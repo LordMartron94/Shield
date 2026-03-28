@@ -15,6 +15,7 @@ Shield is not a substitute for Go’s `testing` package or a full test runner wi
 | **Atom** | One check: a `Runner`, a `Validator`, and registered **cases**. Also ordered by `order`. |
 | **Case** | Named `input` / `expected` pair for one run of the atom’s runner. |
 | **Engine** | Runnable snapshot built from a `Configuration`. |
+| **RunReport** | Returned by `Run`: `Failed` if any top-level unit failed (per gate), `Elapsed`, and `TopLevel` outcomes with full nested `UnitRunReport` trees. |
 | **RuntimeConfiguration** | Blacklists units and/or atoms by **exact name** (see `docs/adr/0001-Runtime-Configuration-Filtering.md`). |
 | **UnitRunReport** | Filled after a unit runs: skips, atom stats, child outcomes. Fed to `UnitEvaluationGate`. |
 | **UnitEvaluationGate** | `func(UnitRunReport) bool` — return `true` if the unit counts as **failed** (for parents and stop-on-child). |
@@ -55,7 +56,8 @@ func main() {
 
     engine := shield.EngineCreate(*cfg)
     rt := shield.RuntimeConfigurationCreate(nil, nil)
-    shield.Run(engine, rt)
+    report := shield.Run(engine, rt)
+    // use report.Failed for pass/fail; report.TopLevel[i].Report for nested detail
 }
 ```
 
@@ -67,7 +69,7 @@ Adjust imports if your `go.mod` uses a module path other than `shield` (for exam
 - **Panics**: Runner, validator, setup, and teardown panics are recovered and logged; they do not crash the process.
 - **Sub-units**: Register with `UnitRegisterSubUnits`. A sub-unit cannot use the same `name` as its parent (registration panics). Nesting is recursive; each unit’s gate sees its own `DirectChildren` with full nested `Report` values.
 - **Dependencies between sibling sub-units**: Call `UnitSetStopRemainingSubUnitsOnChildFailure(parent, true)` so a failed sub-unit skips later siblings. If the parent’s own atoms also depend on those sub-units, add `UnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits(parent, true)`. Default failure classification is `UnitEvaluationDefaultFailed` (override with `UnitSetEvaluationGate`). Blacklist skips are not treated as failure.
-- **Output**: `Run` does not return a consolidated pass/fail value; use echo output or wrap the harness if you need exit codes.
+- **Output**: `Run` returns `RunReport` with `Failed` and per–top-level-unit outcomes (`TopLevel` with nested `Report`). Use echo for detail; use `report.Failed` (or walk `TopLevel`) for exit codes and CI.
 
 ## Repository layout
 

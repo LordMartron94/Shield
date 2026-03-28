@@ -374,21 +374,44 @@ func ShieldCreate(cfg ShieldConfiguration) *Shield {
 	}
 }
 
-func ShieldRun(shield *Shield, runtimeCfg *ShieldRuntimeConfiguration) {
+type ShieldRunReport struct {
+	Elapsed  time.Duration
+	TopLevel []ShieldUnitChildOutcome
+	Failed   bool
+}
+
+func ShieldRun(shield *Shield, runtimeCfg *ShieldRuntimeConfiguration) ShieldRunReport {
 	sorted := extensions.SortedCopyShallow(shield.units, func(a, b ShieldUnit) int {
 		return cmp.Compare(a.order, b.order)
 	})
 
 	startShield := time.Now()
 
+	report := ShieldRunReport{
+		TopLevel: make([]ShieldUnitChildOutcome, 0, len(sorted)),
+	}
+
 	for _, unit := range sorted {
-		shieldUnitRun(unit, runtimeCfg)
+		unitReport := shieldUnitRun(unit, runtimeCfg)
+		failed := shieldUnitEvaluationFailed(unit, unitReport)
+
+		report.TopLevel = append(report.TopLevel, ShieldUnitChildOutcome{
+			Name:   unit.name,
+			Failed: failed,
+			Report: unitReport,
+		})
+
+		if failed {
+			report.Failed = true
+		}
 	}
 
 	endShield := time.Now()
-	elapsedTotal := endShield.Sub(startShield)
+	report.Elapsed = endShield.Sub(startShield)
 
-	logDuration("SHIELD run", elapsedTotal)
+	logDuration("SHIELD run", report.Elapsed)
+
+	return report
 }
 
 // ------------------------------------------------------------- PRIVATE HELPERS

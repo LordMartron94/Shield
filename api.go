@@ -74,6 +74,13 @@ Engine is the runnable graph built from a frozen Configuration.
 type Engine = internal.Shield
 
 /*
+RunReport is the outcome of Run: wall-clock Elapsed, whether any top-level unit Failed
+(per that unit’s evaluation gate or default), and TopLevel entries in execution order
+each carrying the unit name, Failed flag, and full nested UnitRunReport tree.
+*/
+type RunReport = internal.ShieldRunReport
+
+/*
 AtomResultSuccessCreate returns a successful result with no note and without requesting
 skip of further atoms in the unit.
 */
@@ -258,9 +265,10 @@ func EngineCreate(cfg Configuration) *Engine {
 
 /*
 Run walks all registered units in order, respecting runtime blacklists, running sub-units
-and atoms, and logging timing via echo. It does not return a pass/fail summary; consult
-logs for outcomes.
+and atoms, and logging timing via echo. The returned RunReport aggregates top-level failure
+and full nested reports; Failed follows each unit’s UnitEvaluationGate or
+UnitEvaluationDefaultFailed.
 */
-func Run(engine *Engine, runtimeCfg *RuntimeConfiguration) {
-	internal.ShieldRun(engine, runtimeCfg)
+func Run(engine *Engine, runtimeCfg *RuntimeConfiguration) RunReport {
+	return internal.ShieldRun(engine, runtimeCfg)
 }

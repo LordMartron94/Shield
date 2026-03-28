@@ -27,7 +27,8 @@ Typical flow:
     AtomSetSetupAndTeardown / AtomSetDescription.
  3. Optional: UnitSetStopRemainingSubUnitsOnChildFailure / UnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits /
     UnitSetEvaluationGate on units that model dependencies.
- 4. EngineCreate(configuration), Run(engine, runtimeConfiguration).
+ 4. EngineCreate(configuration), report := Run(engine, runtimeConfiguration); use report.Failed
+    and report.TopLevel for exit codes or CI without scraping logs.
 
 Validators return AtomResult by value. Use *AtomResultSuccessCreate(), *AtomResultFailureCreate(reason),
 and the AtomResultSet* helpers when you need notes or to skip remaining atoms in the current unit.
