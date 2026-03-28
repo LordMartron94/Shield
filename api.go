@@ -78,8 +78,78 @@ type Engine = internal.Shield
 RunReport is the outcome of Run: wall-clock Elapsed, whether any top-level unit Failed
 (per that unit’s evaluation gate or default), and TopLevel entries in execution order
 each carrying the unit name, Failed flag, and full nested UnitRunReport tree.
+WrittenReportPath is set when RunWithReportPersistence wrote at least one file successfully
+(primary artifact: JSON path if JSON was written, otherwise the text path).
 */
 type RunReport = internal.ShieldRunReport
+
+/*
+ReportPersistence configures optional on-disk reports under a directory (see RunWithReportPersistence).
+Use ReportPersistenceSetMode for built-in JSON / text / both, or ReportPersistenceSetAdapter for a custom writer
+(adapter wins over mode when non-nil).
+*/
+type ReportPersistence = internal.ShieldReportPersistence
+
+/*
+ReportPersistenceMode selects built-in persistence output when no custom ReportPersistAdapter is set.
+*/
+type ReportPersistenceMode = internal.ShieldReportPersistenceMode
+
+const (
+	ReportPersistenceModeJSON       = internal.ShieldReportPersistenceModeJSON
+	ReportPersistenceModeTXT        = internal.ShieldReportPersistenceModeTXT
+	ReportPersistenceModeJSONAndTXT = internal.ShieldReportPersistenceModeJSONAndTXT
+)
+
+/*
+RunAggregates is the counter bundle inside RunMetrics (tree-walk summary).
+*/
+type RunAggregates = internal.ShieldRunAggregates
+
+/*
+RunMetrics is the post-run snapshot passed to custom persistence adapters and mirrored in persisted JSON.
+*/
+type RunMetrics = internal.ShieldRunMetrics
+
+/*
+ReportPersistAdapter writes RunReport and RunMetrics to outputDir; return the primary path for RunReport.WrittenReportPath.
+*/
+type ReportPersistAdapter = internal.ShieldReportPersistAdapter
+
+/*
+ReportDocumentSchemaVersion is the schema_version field written to JSON report files.
+*/
+const ReportDocumentSchemaVersion = internal.ShieldReportDocumentSchemaVersion
+
+/*
+ReportPersistenceCreate returns persistence state for an output directory (cleaned at write time).
+Disabled by default; default mode is JSON. Use ReportPersistenceSetEnabled(true) to write after a run.
+*/
+func ReportPersistenceCreate(outputDir string) *ReportPersistence {
+	return internal.ShieldReportPersistenceCreate(outputDir)
+}
+
+/*
+ReportPersistenceSetEnabled turns disk persistence on or off. When false, RunWithReportPersistence
+behaves like Run for I/O.
+*/
+func ReportPersistenceSetEnabled(p *ReportPersistence, value bool) {
+	internal.ShieldReportPersistenceSetEnabled(p, value)
+}
+
+/*
+ReportPersistenceSetMode selects built-in JSON, text, or both. Ignored when ReportPersistenceSetAdapter is non-nil.
+*/
+func ReportPersistenceSetMode(p *ReportPersistence, mode ReportPersistenceMode) {
+	internal.ShieldReportPersistenceSetMode(p, mode)
+}
+
+/*
+ReportPersistenceSetAdapter registers a custom writer; nil clears it and restores mode-driven built-ins.
+*/
+func ReportPersistenceSetAdapter(p *ReportPersistence, adapter ReportPersistAdapter) {
+	internal.ShieldReportPersistenceSetAdapter(p, adapter)
+}
 
 /*
 AtomResultSuccessCreate returns a successful result with no note and without requesting
@@ -301,4 +371,19 @@ UnitEvaluationGate or UnitEvaluationDefaultFailed.
 */
 func Run(engine *Engine, runtimeCfg *RuntimeConfiguration) RunReport {
 	return internal.ShieldRun(engine, runtimeCfg)
+}
+
+/*
+RunWithReportPersistence runs the engine like Run, then may write reports under
+ReportPersistenceCreate’s directory when persistence is enabled. Built-in output is chosen with
+ReportPersistenceSetMode (JSON, TXT, or JSONAndTXT). If ReportPersistenceSetAdapter is non-nil,
+only the adapter runs. Filenames use a UTC timestamp stem shield-run-YYYYMMDD-hhmmss.nnnnnnnnn;
+if a name exists, a numeric suffix is tried. Failures to write are logged via echo and do not fail the run.
+*/
+func RunWithReportPersistence(
+	engine *Engine,
+	runtimeCfg *RuntimeConfiguration,
+	persist *ReportPersistence,
+) RunReport {
+	return internal.ShieldRunWithPersistence(engine, runtimeCfg, persist)
 }

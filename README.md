@@ -15,7 +15,10 @@ Shield is not a substitute for Go’s `testing` package or a full test runner wi
 | **Atom** | One check: a `Runner`, a `Validator`, and registered **cases**. Also ordered by `order`. |
 | **Case** | Named `input` / `expected` pair for one run of the atom’s runner. |
 | **Engine** | Runnable snapshot built from a `Configuration`. |
-| **RunReport** | Returned by `Run`: `Failed` if any top-level unit failed (per gate), `Elapsed`, and `TopLevel` outcomes with full nested `UnitRunReport` trees. |
+| **RunReport** | Returned by `Run` / `RunWithReportPersistence`: `Failed`, `Elapsed`, `TopLevel`, optional `WrittenReportPath` when persistence wrote a file. |
+| **ReportPersistence** | Output directory, enable flag, `ReportPersistenceMode` (JSON / TXT / JSONAndTXT), or custom `ReportPersistAdapter`. |
+| **ReportPersistenceMode** | Built-in writers: `ReportPersistenceModeJSON`, `ReportPersistenceModeTXT`, `ReportPersistenceModeJSONAndTXT`. |
+| **RunMetrics** | Snapshot passed to `ReportPersistAdapter` (aggregates + atom timing stats). |
 | **RuntimeConfiguration** | Blacklists units and/or atoms by **exact name** (see `docs/adr/0001-Runtime-Configuration-Filtering.md`). |
 | **UnitRunReport** | Filled after a unit runs: skips, atom stats, child outcomes. Fed to `UnitEvaluationGate`. |
 | **UnitEvaluationGate** | `func(UnitRunReport) bool` — return `true` if the unit counts as **failed** (for parents and stop-on-child). |
@@ -45,7 +48,7 @@ func main() {
     unit := shield.UnitCreate(0, "example")
     atom := shield.AtomCreate(0, "equals_self", func(in int) int { return in },
         func(out int, c shield.Case[int, int]) shield.AtomResult {
-            if out == c.expected {
+            if out == shield.CaseExpectedGet(c) {
                 return *shield.AtomResultSuccessCreate()
             }
             return *shield.AtomResultFailureCreate("output != expected")
@@ -71,8 +74,16 @@ Adjust imports if your `go.mod` uses a module path other than `shield` (for exam
 - **Dependencies between sibling sub-units**: Call `UnitSetStopRemainingSubUnitsOnChildFailure(parent, true)` so a failed sub-unit skips later siblings. If the parent’s own atoms also depend on those sub-units, add `UnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits(parent, true)`. Default failure classification is `UnitEvaluationDefaultFailed` (override with `UnitSetEvaluationGate`). Blacklist skips are not treated as failure.
 - **Output**: `Run` returns `RunReport` with `Failed` and per–top-level-unit outcomes (`TopLevel` with nested `Report`). Echo also emits a final **Shield run summary** (structured fields: counts, `run_failed`, timing aggregates; atom-duration mean/min/max/stddev via statarch/blaze when atoms ran). Use `report.Failed` (or walk `TopLevel`) for exit codes and CI.
 
+## Persisting run reports
+
+Use `ReportPersistenceCreate(dir)`, `ReportPersistenceSetEnabled(true)`, `ReportPersistenceSetMode` with `ReportPersistenceModeJSON`, `ReportPersistenceModeTXT`, or `ReportPersistenceModeJSONAndTXT` (default after create is JSON), then `RunWithReportPersistence(engine, rt, persist)`. For a custom writer, `ReportPersistenceSetAdapter(persist, func(dir string, report shield.RunReport, metrics shield.RunMetrics) (string, error) { ... })`; when set, **mode is ignored**. The directory is created with mode `0750`; built-in files use mode `0640`.
+
+- **Filenames**: `shield-run-YYYYMMDD-hhmmss.nnnnnnnnn.json` (or `.txt`), UTC wall time from the metrics snapshot. If that name exists, `_1`, `_2`, … are inserted before the extension (up to 1000 attempts).
+- **JSON**: `schema_version` is `ReportDocumentSchemaVersion` (currently 1). The document includes `written_at`, `run_failed`, `elapsed_ns`, a **summary** block (aggregate counts + optional atom-duration stats), and a **tree** mirroring top-level units and nested `UnitRunReport` data. Per-atom / per-case rows are not included in v1.
+- **Primary path**: On success, `RunReport.WrittenReportPath` is the JSON path when JSON was written, otherwise the text path. Write errors are logged via echo and do not fail the run.
+
 ## Repository layout
 
 - `api.go` — public types and functions (thin wrappers over `internal`).
-- `internal/` — execution engine, echo registration, end-of-run summary (statarch/blaze when available through the workspace).
+- `internal/` — execution engine, echo registration, metrics/summary, optional report persistence (`report_persist.go`), statarch/blaze when available through the workspace.
 - `docs/adr/` — architecture decisions (filtering, testing stance, etc.).

@@ -391,12 +391,29 @@ func ShieldCreate(cfg ShieldConfiguration) *Shield {
 }
 
 type ShieldRunReport struct {
-	Elapsed  time.Duration
-	TopLevel []ShieldUnitChildOutcome
-	Failed   bool
+	Elapsed             time.Duration
+	TopLevel            []ShieldUnitChildOutcome
+	Failed              bool
+	WrittenReportPath   string
 }
 
 func ShieldRun(shield *Shield, runtimeCfg *ShieldRuntimeConfiguration) ShieldRunReport {
+	return shieldRunExecute(shield, runtimeCfg, nil)
+}
+
+func ShieldRunWithPersistence(
+	shield *Shield,
+	runtimeCfg *ShieldRuntimeConfiguration,
+	persist *ShieldReportPersistence,
+) ShieldRunReport {
+	return shieldRunExecute(shield, runtimeCfg, persist)
+}
+
+func shieldRunExecute(
+	shield *Shield,
+	runtimeCfg *ShieldRuntimeConfiguration,
+	persist *ShieldReportPersistence,
+) ShieldRunReport {
 	sorted := extensions.SortedCopyShallow(shield.units, func(a, b ShieldUnit) int {
 		return cmp.Compare(a.order, b.order)
 	})
@@ -428,7 +445,10 @@ func ShieldRun(shield *Shield, runtimeCfg *ShieldRuntimeConfiguration) ShieldRun
 	report.Elapsed = endShield.Sub(startShield)
 
 	logDuration("SHIELD run", report.Elapsed)
-	shieldRunSummaryEmit(report, tel)
+
+	metrics := shieldRunMetricsBuild(report, tel)
+	shieldRunSummaryEmit(report, metrics)
+	report.WrittenReportPath = shieldRunReportWrite(persist, report, metrics)
 
 	return report
 }

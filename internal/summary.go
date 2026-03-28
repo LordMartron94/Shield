@@ -11,99 +11,101 @@ import (
 	"memstruct"
 	"statarch/core"
 	"statarch/descriptive"
+	"time"
 )
 
 type shieldRunTelemetry struct {
 	atomDurationsNs []float64
 }
 
-type shieldRunAggregates struct {
-	unitsVisited            int
-	unitsSkippedBlacklist   int
-	unitsSkippedSetup       int
-	atomValidationFailures  int
-	atomPanics              int
-	atomSetupFailures       int
-	subUnitLoopEarlyStops   int
-	unitsFailedGate         int
+// ShieldRunAggregates holds tree-walk counters for a completed run (exported for ReportPersistAdapter).
+type ShieldRunAggregates struct {
+	UnitsVisited            int
+	UnitsSkippedBlacklist   int
+	UnitsSkippedSetup       int
+	AtomValidationFailures  int
+	AtomPanics              int
+	AtomSetupFailures       int
+	SubUnitLoopEarlyStops   int
+	UnitsFailedGate         int
 }
 
-func shieldRunReportAggregate(report ShieldRunReport) shieldRunAggregates {
-	var a shieldRunAggregates
+// ShieldRunMetrics is the snapshot passed to echo summary, disk writers, and custom adapters.
+type ShieldRunMetrics struct {
+	WallTime   time.Time
+	Aggregates ShieldRunAggregates
+
+	AtomsTimedN int
+
+	DurationStatsOK    bool
+	DurationStatsError string
+	MeanNs             float64
+	StddevPopNs        float64
+	MinNs              float64
+	MaxNs              float64
+}
+
+func shieldRunReportAggregate(report ShieldRunReport) ShieldRunAggregates {
+	var a ShieldRunAggregates
 
 	for _, tl := range report.TopLevel {
 		shieldAggregatesAddUnitReport(&a, tl.Report)
 
 		if tl.Failed {
-			a.unitsFailedGate++
+			a.UnitsFailedGate++
 		}
 	}
 
 	return a
 }
 
-func shieldAggregatesAddUnitReport(a *shieldRunAggregates, r ShieldUnitRunReport) {
-	a.unitsVisited++
+func shieldAggregatesAddUnitReport(a *ShieldRunAggregates, r ShieldUnitRunReport) {
+	a.UnitsVisited++
 
 	if r.SkippedDueToBlacklist {
-		a.unitsSkippedBlacklist++
+		a.UnitsSkippedBlacklist++
 
 		return
 	}
 
 	if r.SkippedDueToSetup {
-		a.unitsSkippedSetup++
+		a.UnitsSkippedSetup++
 
 		return
 	}
 
-	a.atomValidationFailures += r.AtomValidationFailures
-	a.atomPanics += r.AtomPanics
-	a.atomSetupFailures += r.AtomSetupFailureCount
+	a.AtomValidationFailures += r.AtomValidationFailures
+	a.AtomPanics += r.AtomPanics
+	a.AtomSetupFailures += r.AtomSetupFailureCount
 
 	if r.TerminatedSubUnitLoopEarly {
-		a.subUnitLoopEarlyStops++
+		a.SubUnitLoopEarlyStops++
 	}
 
 	for _, ch := range r.DirectChildren {
 		if ch.Failed {
-			a.unitsFailedGate++
+			a.UnitsFailedGate++
 		}
 
 		shieldAggregatesAddUnitReport(a, ch.Report)
 	}
 }
 
-func shieldRunSummaryEmit(report ShieldRunReport, tel *shieldRunTelemetry) {
-	agg := shieldRunReportAggregate(report)
-
-	elapsedNs := float64(report.Elapsed.Nanoseconds())
-
-	logger := echo.On(shieldSystemID).
-		Field("summary", true).
-		Field("run_failed", report.Failed).
-		Field("elapsed_ns", report.Elapsed.Nanoseconds()).
-		Field("elapsed", formatting.FormatDurationNSF64(elapsedNs)).
-		Field("units_visited", agg.unitsVisited).
-		Field("units_skipped_blacklist", agg.unitsSkippedBlacklist).
-		Field("units_skipped_setup", agg.unitsSkippedSetup).
-		Field("atom_validation_failures", agg.atomValidationFailures).
-		Field("atom_panics", agg.atomPanics).
-		Field("atom_setup_failures", agg.atomSetupFailures).
-		Field("subunit_loop_early_stops", agg.subUnitLoopEarlyStops).
-		Field("units_failed_gate", agg.unitsFailedGate)
-
-	n := 0
-	if tel != nil {
-		n = len(tel.atomDurationsNs)
+func shieldRunMetricsBuild(report ShieldRunReport, tel *shieldRunTelemetry) ShieldRunMetrics {
+	m := ShieldRunMetrics{
+		WallTime:   time.Now().UTC(),
+		Aggregates: shieldRunReportAggregate(report),
 	}
 
-	logger = logger.Field("atoms_timed", n)
+	if tel == nil {
+		return m
+	}
+
+	n := len(tel.atomDurationsNs)
+	m.AtomsTimedN = n
 
 	if n == 0 {
-		logger.Info("Shield run summary")
-
-		return
+		return m
 	}
 
 	allocator := memforge.FixedLinearAllocatorCreate(uint64(memcore.MegaByte))
@@ -117,34 +119,75 @@ func shieldRunSummaryEmit(report ShieldRunReport, tel *shieldRunTelemetry) {
 
 	err := memstruct.VectorSetFromSliceRange(vecMark, tel.atomDurationsNs, 0, uint64(n), 0)
 	if err != nil {
-		logger.Field("summary_stats_error", err.Error()).Info("Shield run summary")
+		m.DurationStatsError = err.Error()
 
-		return
+		return m
 	}
 
 	analysis := core.StatArchAnalysisCreate[float64](vecMark, allocFn)
 
-	mean := descriptive.StatArchDescriptiveVectorMeanF64(analysis)
+	m.MeanNs = descriptive.StatArchDescriptiveVectorMeanF64(analysis)
 	minV, maxV := reduce.BlazeReduceVectorMinMax[float64](vecMark)
-
-	var stddev float64
+	m.MinNs = float64(minV)
+	m.MaxNs = float64(maxV)
 
 	if n >= 2 {
-		stddev = descriptive.StatArchDescriptiveVectorStandardDeviationF64(analysis, false)
+		m.StddevPopNs = descriptive.StatArchDescriptiveVectorStandardDeviationF64(analysis, false)
+	}
+
+	m.DurationStatsOK = true
+
+	return m
+}
+
+func shieldRunSummaryEmit(report ShieldRunReport, metrics ShieldRunMetrics) {
+	elapsedNs := float64(report.Elapsed.Nanoseconds())
+
+	logger := echo.On(shieldSystemID).
+		Field("summary", true).
+		Field("run_failed", report.Failed).
+		Field("elapsed_ns", report.Elapsed.Nanoseconds()).
+		Field("elapsed", formatting.FormatDurationNSF64(elapsedNs)).
+		Field("units_visited", metrics.Aggregates.UnitsVisited).
+		Field("units_skipped_blacklist", metrics.Aggregates.UnitsSkippedBlacklist).
+		Field("units_skipped_setup", metrics.Aggregates.UnitsSkippedSetup).
+		Field("atom_validation_failures", metrics.Aggregates.AtomValidationFailures).
+		Field("atom_panics", metrics.Aggregates.AtomPanics).
+		Field("atom_setup_failures", metrics.Aggregates.AtomSetupFailures).
+		Field("subunit_loop_early_stops", metrics.Aggregates.SubUnitLoopEarlyStops).
+		Field("units_failed_gate", metrics.Aggregates.UnitsFailedGate).
+		Field("atoms_timed", metrics.AtomsTimedN)
+
+	if metrics.AtomsTimedN == 0 {
+		logger.Info("Shield run summary")
+
+		return
+	}
+
+	if metrics.DurationStatsError != "" {
+		logger.Field("summary_stats_error", metrics.DurationStatsError).Info("Shield run summary")
+
+		return
+	}
+
+	if !metrics.DurationStatsOK {
+		logger.Info("Shield run summary")
+
+		return
 	}
 
 	logger.
-		Field("atom_duration_mean_ns", mean).
-		Field("atom_duration_stddev_pop_ns", stddev).
-		Field("atom_duration_min_ns", float64(minV)).
-		Field("atom_duration_max_ns", float64(maxV)).
-		Field("atom_duration_mean", formatting.FormatDurationNSF64(mean)).
-		Field("atom_duration_min", formatting.FormatDurationNSF64(float64(minV))).
-		Field("atom_duration_max", formatting.FormatDurationNSF64(float64(maxV))).
+		Field("atom_duration_mean_ns", metrics.MeanNs).
+		Field("atom_duration_stddev_pop_ns", metrics.StddevPopNs).
+		Field("atom_duration_min_ns", metrics.MinNs).
+		Field("atom_duration_max_ns", metrics.MaxNs).
+		Field("atom_duration_mean", formatting.FormatDurationNSF64(metrics.MeanNs)).
+		Field("atom_duration_min", formatting.FormatDurationNSF64(metrics.MinNs)).
+		Field("atom_duration_max", formatting.FormatDurationNSF64(metrics.MaxNs)).
 		Info(fmt.Sprintf(
 			"Shield run summary (atom timing mean=%s min=%s max=%s)",
-			formatting.FormatDurationNSF64(mean),
-			formatting.FormatDurationNSF64(float64(minV)),
-			formatting.FormatDurationNSF64(float64(maxV)),
+			formatting.FormatDurationNSF64(metrics.MeanNs),
+			formatting.FormatDurationNSF64(metrics.MinNs),
+			formatting.FormatDurationNSF64(metrics.MaxNs),
 		))
 }

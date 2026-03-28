@@ -35,6 +35,10 @@ Typical flow:
     UnitSetEvaluationGate on units that model dependencies.
  4. EngineCreate(configuration), report := Run(engine, runtimeConfiguration); use report.Failed
     and report.TopLevel for exit codes or CI without scraping logs.
+ 5. Optional: ReportPersistenceCreate(outputDir), ReportPersistenceSetEnabled(true),
+    ReportPersistenceSetMode(ReportPersistenceModeJSON|TXT|JSONAndTXT), or ReportPersistenceSetAdapter
+    for a custom persister, then RunWithReportPersistence. Persisted JSON uses schema_version
+    ReportDocumentSchemaVersion; see README for filename pattern and limitations (no per-atom rows in v1).
 
 Validators return AtomResult by value. Use *AtomResultSuccessCreate(), *AtomResultFailureCreate(reason),
 and the AtomResultSet* helpers when you need notes or to skip remaining atoms in the current unit.
