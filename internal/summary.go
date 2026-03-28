@@ -1,10 +1,10 @@
 package internal
 
 import (
-	"blaze/reduce"
 	"echo"
 	"fmt"
 	"foundation/formatting"
+	"math"
 	"memarch"
 	"memcore"
 	"memforge"
@@ -43,7 +43,18 @@ type ShieldRunMetrics struct {
 	StddevPopNs        float64
 	MinNs              float64
 	MaxNs              float64
+
+	DurationSumNs       float64
+	DurationMedianNs    float64
+	DurationQ1Ns        float64
+	DurationQ3Ns        float64
+	DurationIQRNs       float64
+	DurationP95Ns       float64
+	DurationP99Ns       float64
+	DurationCoeffVarPop float64
 }
+
+const shieldDurationMeanEpsilonNs = 1e-9
 
 func shieldRunReportAggregate(report ShieldRunReport) ShieldRunAggregates {
 	var a ShieldRunAggregates
@@ -127,12 +138,26 @@ func shieldRunMetricsBuild(report ShieldRunReport, tel *shieldRunTelemetry) Shie
 	analysis := core.StatArchAnalysisCreate[float64](vecMark, allocFn)
 
 	m.MeanNs = descriptive.StatArchDescriptiveVectorMeanF64(analysis)
-	minV, maxV := reduce.BlazeReduceVectorMinMax[float64](vecMark)
-	m.MinNs = float64(minV)
-	m.MaxNs = float64(maxV)
 
 	if n >= 2 {
 		m.StddevPopNs = descriptive.StatArchDescriptiveVectorStandardDeviationF64(analysis, false)
+	}
+
+	m.DurationSumNs = descriptive.StatArchDescriptiveVectorSumF64(analysis)
+
+	five := descriptive.StatArchDescriptiveVectorFiveNumberSummaryF64(analysis)
+	m.MinNs = five.Min
+	m.MaxNs = five.Max
+	m.DurationMedianNs = five.Median
+	m.DurationQ1Ns = five.Q1
+	m.DurationQ3Ns = five.Q3
+	m.DurationIQRNs = five.Q3 - five.Q1
+
+	m.DurationP95Ns = descriptive.StatArchDescriptiveVectorPercentileF64(analysis, 95)
+	m.DurationP99Ns = descriptive.StatArchDescriptiveVectorPercentileF64(analysis, 99)
+
+	if n >= 2 && math.Abs(m.MeanNs) > shieldDurationMeanEpsilonNs {
+		m.DurationCoeffVarPop = descriptive.StatArchDescriptiveVectorCoefficientVariantF64(analysis, false)
 	}
 
 	m.DurationStatsOK = true
@@ -176,18 +201,31 @@ func shieldRunSummaryEmit(report ShieldRunReport, metrics ShieldRunMetrics) {
 		return
 	}
 
-	logger.
+	logger = logger.
 		Field("atom_duration_mean_ns", metrics.MeanNs).
 		Field("atom_duration_stddev_pop_ns", metrics.StddevPopNs).
 		Field("atom_duration_min_ns", metrics.MinNs).
 		Field("atom_duration_max_ns", metrics.MaxNs).
+		Field("atom_duration_sum_ns", metrics.DurationSumNs).
+		Field("atom_duration_median_ns", metrics.DurationMedianNs).
+		Field("atom_duration_p95_ns", metrics.DurationP95Ns).
+		Field("atom_duration_p99_ns", metrics.DurationP99Ns).
+		Field("atom_duration_iqr_ns", metrics.DurationIQRNs).
 		Field("atom_duration_mean", formatting.FormatDurationNSF64(metrics.MeanNs)).
 		Field("atom_duration_min", formatting.FormatDurationNSF64(metrics.MinNs)).
 		Field("atom_duration_max", formatting.FormatDurationNSF64(metrics.MaxNs)).
-		Info(fmt.Sprintf(
-			"Shield run summary (atom timing mean=%s min=%s max=%s)",
-			formatting.FormatDurationNSF64(metrics.MeanNs),
-			formatting.FormatDurationNSF64(metrics.MinNs),
-			formatting.FormatDurationNSF64(metrics.MaxNs),
-		))
+		Field("atom_duration_median", formatting.FormatDurationNSF64(metrics.DurationMedianNs)).
+		Field("atom_duration_p95", formatting.FormatDurationNSF64(metrics.DurationP95Ns)).
+		Field("atom_duration_p99", formatting.FormatDurationNSF64(metrics.DurationP99Ns))
+
+	if metrics.AtomsTimedN >= 2 && math.Abs(metrics.MeanNs) > shieldDurationMeanEpsilonNs {
+		logger = logger.Field("atom_duration_coeff_var_pop", metrics.DurationCoeffVarPop)
+	}
+
+	logger.Info(fmt.Sprintf(
+		"Shield run summary (atom timing mean=%s median=%s p95=%s)",
+		formatting.FormatDurationNSF64(metrics.MeanNs),
+		formatting.FormatDurationNSF64(metrics.DurationMedianNs),
+		formatting.FormatDurationNSF64(metrics.DurationP95Ns),
+	))
 }

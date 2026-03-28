@@ -5,13 +5,14 @@ import (
 	"echo"
 	"fmt"
 	"foundation/formatting"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
-const shieldReportSchemaVersion = 1
+const shieldReportSchemaVersion = 2
 
 // ShieldReportDocumentSchemaVersion is exported for clients documenting persisted JSON.
 const ShieldReportDocumentSchemaVersion = shieldReportSchemaVersion
@@ -80,9 +81,20 @@ type shieldReportDurationSummary struct {
 	StddevPopNs     float64 `json:"stddev_pop_ns"`
 	MinNs           float64 `json:"min_ns"`
 	MaxNs           float64 `json:"max_ns"`
+	SumNs           float64 `json:"sum_ns"`
+	MedianNs        float64 `json:"median_ns"`
+	Q1Ns            float64 `json:"q1_ns"`
+	Q3Ns            float64 `json:"q3_ns"`
+	IQRNs           float64 `json:"iqr_ns"`
+	P95Ns           float64 `json:"p95_ns"`
+	P99Ns           float64 `json:"p99_ns"`
+	CoeffVarPop     float64 `json:"coeff_var_pop,omitempty"`
 	MeanHuman       string  `json:"mean_human"`
 	MinHuman        string  `json:"min_human"`
 	MaxHuman        string  `json:"max_human"`
+	MedianHuman     string  `json:"median_human"`
+	P95Human        string  `json:"p95_human"`
+	P99Human        string  `json:"p99_human"`
 	StatsError      string  `json:"stats_error,omitempty"`
 }
 
@@ -186,9 +198,22 @@ func shieldReportBuildDocument(report ShieldRunReport, metrics ShieldRunMetrics)
 		if metrics.DurationStatsError != "" {
 			ds.StatsError = metrics.DurationStatsError
 		} else if metrics.DurationStatsOK {
+			ds.SumNs = metrics.DurationSumNs
+			ds.MedianNs = metrics.DurationMedianNs
+			ds.Q1Ns = metrics.DurationQ1Ns
+			ds.Q3Ns = metrics.DurationQ3Ns
+			ds.IQRNs = metrics.DurationIQRNs
+			ds.P95Ns = metrics.DurationP95Ns
+			ds.P99Ns = metrics.DurationP99Ns
+			if metrics.AtomsTimedN >= 2 && math.Abs(metrics.MeanNs) > shieldDurationMeanEpsilonNs {
+				ds.CoeffVarPop = metrics.DurationCoeffVarPop
+			}
 			ds.MeanHuman = formatting.FormatDurationNSF64(metrics.MeanNs)
 			ds.MinHuman = formatting.FormatDurationNSF64(metrics.MinNs)
 			ds.MaxHuman = formatting.FormatDurationNSF64(metrics.MaxNs)
+			ds.MedianHuman = formatting.FormatDurationNSF64(metrics.DurationMedianNs)
+			ds.P95Human = formatting.FormatDurationNSF64(metrics.DurationP95Ns)
+			ds.P99Human = formatting.FormatDurationNSF64(metrics.DurationP99Ns)
 		}
 
 		doc.Summary.Duration = ds
@@ -385,14 +410,24 @@ func shieldReportFormatTXT(doc shieldReportDocument) string {
 		if s.Duration.StatsError != "" {
 			fmt.Fprintf(&b, "  Stats error: %s\n", s.Duration.StatsError)
 		} else {
+			fmt.Fprintf(&b, "  Sum: %.0f ns\n", s.Duration.SumNs)
 			fmt.Fprintf(&b, "  Mean: %s (%.0f ns)\n", s.Duration.MeanHuman, s.Duration.MeanNs)
 			fmt.Fprintf(&b, "  Stddev (pop): %.0f ns\n", s.Duration.StddevPopNs)
 			fmt.Fprintf(&b, "  Min: %s (%.0f ns)\n", s.Duration.MinHuman, s.Duration.MinNs)
+			fmt.Fprintf(&b, "  Q1: %.0f ns\n", s.Duration.Q1Ns)
+			fmt.Fprintf(&b, "  Median: %s (%.0f ns)\n", s.Duration.MedianHuman, s.Duration.MedianNs)
+			fmt.Fprintf(&b, "  Q3: %.0f ns\n", s.Duration.Q3Ns)
+			fmt.Fprintf(&b, "  IQR: %.0f ns\n", s.Duration.IQRNs)
+			fmt.Fprintf(&b, "  P95: %s (%.0f ns)\n", s.Duration.P95Human, s.Duration.P95Ns)
+			fmt.Fprintf(&b, "  P99: %s (%.0f ns)\n", s.Duration.P99Human, s.Duration.P99Ns)
 			fmt.Fprintf(&b, "  Max: %s (%.0f ns)\n", s.Duration.MaxHuman, s.Duration.MaxNs)
+			if s.Duration.AtomsTimed >= 2 && math.Abs(s.Duration.MeanNs) > shieldDurationMeanEpsilonNs {
+				fmt.Fprintf(&b, "  Coeff var (pop): %g\n", s.Duration.CoeffVarPop)
+			}
 		}
 	}
 
-	b.WriteString("\nUnit tree (aggregates only; per-atom rows not in v1)\n")
+	b.WriteString("\nUnit tree (aggregates only; per-atom rows not in schema v2)\n")
 	for _, top := range doc.Tree {
 		shieldReportWriteTXTUnit(&b, top.Name, top.Failed, top.Report, 0)
 	}

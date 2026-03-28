@@ -108,6 +108,10 @@ type RunAggregates = internal.ShieldRunAggregates
 
 /*
 RunMetrics is the post-run snapshot passed to custom persistence adapters and mirrored in persisted JSON.
+When atom durations were collected, DurationStatsOK is true and fields include MeanNs, StddevPopNs (n≥2),
+MinNs/MaxNs (aligned with the five-number path), DurationSumNs, DurationMedianNs, DurationQ1Ns,
+DurationQ3Ns, DurationIQRNs, DurationP95Ns, DurationP99Ns, and DurationCoeffVarPop when n≥2 and |MeanNs|
+is above an internal epsilon (otherwise zero and omitted from JSON via omitempty where applicable).
 */
 type RunMetrics = internal.ShieldRunMetrics
 

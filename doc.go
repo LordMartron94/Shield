@@ -21,9 +21,11 @@ Failures in runner or validator paths are recovered, logged, and do not crash th
 
 After each Run, a structured "Shield run summary" line is logged via echo (field `summary` true)
 with aggregate counts from the report tree; when any atoms executed, per-atom wall times are copied
-into a manual-memory vector and summarized with statarch (mean, population standard deviation) and
-blaze (min/max). Resolve statarch/blaze/memforge via your go.work / submodule layout; the shield
-module go.mod does not list those requirements.
+into a manual-memory vector and summarized with statarch (mean, population standard deviation, sum,
+five-number min/Q1/median/Q3/max, IQR, p95/p99, and population coefficient of variation only when
+there are at least two samples and the mean magnitude exceeds a tiny epsilon—otherwise CV is omitted
+to avoid division by zero in statarch). Resolve statarch/memforge via your go.work / submodule layout;
+the shield module go.mod does not list those requirements.
 
 Typical flow:
 
@@ -38,7 +40,8 @@ Typical flow:
  5. Optional: ReportPersistenceCreate(outputDir), ReportPersistenceSetEnabled(true),
     ReportPersistenceSetMode(ReportPersistenceModeJSON|TXT|JSONAndTXT), or ReportPersistenceSetAdapter
     for a custom persister, then RunWithReportPersistence. Persisted JSON uses schema_version
-    ReportDocumentSchemaVersion; see README for filename pattern and limitations (no per-atom rows in v1).
+    ReportDocumentSchemaVersion (2 adds extended duration aggregates); see README for filename pattern
+    and limitations (no per-atom rows; quartiles/tail percentiles are noisy for very small n).
 
 Validators return AtomResult by value. Use *AtomResultSuccessCreate(), *AtomResultFailureCreate(reason),
 and the AtomResultSet* helpers when you need notes or to skip remaining atoms in the current unit.
