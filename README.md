@@ -69,10 +69,10 @@ Adjust imports if your `go.mod` uses a module path other than `shield` (for exam
 - **Panics**: Runner, validator, setup, and teardown panics are recovered and logged; they do not crash the process.
 - **Sub-units**: Register with `UnitRegisterSubUnits`. A sub-unit cannot use the same `name` as its parent (registration panics). Nesting is recursive; each unit’s gate sees its own `DirectChildren` with full nested `Report` values.
 - **Dependencies between sibling sub-units**: Call `UnitSetStopRemainingSubUnitsOnChildFailure(parent, true)` so a failed sub-unit skips later siblings. If the parent’s own atoms also depend on those sub-units, add `UnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits(parent, true)`. Default failure classification is `UnitEvaluationDefaultFailed` (override with `UnitSetEvaluationGate`). Blacklist skips are not treated as failure.
-- **Output**: `Run` returns `RunReport` with `Failed` and per–top-level-unit outcomes (`TopLevel` with nested `Report`). Use echo for detail; use `report.Failed` (or walk `TopLevel`) for exit codes and CI.
+- **Output**: `Run` returns `RunReport` with `Failed` and per–top-level-unit outcomes (`TopLevel` with nested `Report`). Echo also emits a final **Shield run summary** (structured fields: counts, `run_failed`, timing aggregates; atom-duration mean/min/max/stddev via statarch/blaze when atoms ran). Use `report.Failed` (or walk `TopLevel`) for exit codes and CI.
 
 ## Repository layout
 
 - `api.go` — public types and functions (thin wrappers over `internal`).
-- `internal/` — execution engine and echo registration.
+- `internal/` — execution engine, echo registration, end-of-run summary (statarch/blaze when available through the workspace).
 - `docs/adr/` — architecture decisions (filtering, testing stance, etc.).

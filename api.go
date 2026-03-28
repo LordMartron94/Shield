@@ -28,6 +28,7 @@ type Atom[TInput, TOutput any] = internal.ShieldAtom[TInput, TOutput]
 
 /*
 Case binds a name, input, and expected output for one invocation of an atom’s runner.
+Read fields in validators via CaseNameGet, CaseInputGet, CaseExpectedGet, and CaseDescriptionGet.
 */
 type Case[TInput, TOutput any] = internal.ShieldCase[TInput, TOutput]
 
@@ -248,6 +249,34 @@ func CaseSetDescription[TInput, TOutput any](c *Case[TInput, TOutput], descripti
 }
 
 /*
+CaseNameGet returns the case name supplied to CaseCreate.
+*/
+func CaseNameGet[TInput, TOutput any](c Case[TInput, TOutput]) string {
+	return internal.ShieldCaseNameGet(c)
+}
+
+/*
+CaseInputGet returns the input value the runner receives for this case.
+*/
+func CaseInputGet[TInput, TOutput any](c Case[TInput, TOutput]) TInput {
+	return internal.ShieldCaseInputGet(c)
+}
+
+/*
+CaseExpectedGet returns the expected output clients associate with this case (validator contract).
+*/
+func CaseExpectedGet[TInput, TOutput any](c Case[TInput, TOutput]) TOutput {
+	return internal.ShieldCaseExpectedGet(c)
+}
+
+/*
+CaseDescriptionGet returns the optional description pointer, or nil if unset.
+*/
+func CaseDescriptionGet[TInput, TOutput any](c Case[TInput, TOutput]) *string {
+	return internal.ShieldCaseDescriptionGet(c)
+}
+
+/*
 RuntimeConfigurationCreate builds filtering state. Empty slices mean nothing is blacklisted.
 Matching is by unit name or atom name string equality.
 */
@@ -265,9 +294,10 @@ func EngineCreate(cfg Configuration) *Engine {
 
 /*
 Run walks all registered units in order, respecting runtime blacklists, running sub-units
-and atoms, and logging timing via echo. The returned RunReport aggregates top-level failure
-and full nested reports; Failed follows each unit’s UnitEvaluationGate or
-UnitEvaluationDefaultFailed.
+and atoms, and logging timing via echo. After the run it logs a structured Shield run summary
+(counts and, when atoms executed, statarch/blaze-backed duration statistics). The returned
+RunReport aggregates top-level failure and full nested reports; Failed follows each unit’s
+UnitEvaluationGate or UnitEvaluationDefaultFailed.
 */
 func Run(engine *Engine, runtimeCfg *RuntimeConfiguration) RunReport {
 	return internal.ShieldRun(engine, runtimeCfg)

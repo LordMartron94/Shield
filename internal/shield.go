@@ -316,6 +316,22 @@ func ShieldCaseSetDescription[TInput, TOutput any](shieldCase *ShieldCase[TInput
 	shieldCase.description = &description
 }
 
+func ShieldCaseNameGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) string {
+	return c.name
+}
+
+func ShieldCaseInputGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) TInput {
+	return c.input
+}
+
+func ShieldCaseExpectedGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) TOutput {
+	return c.expected
+}
+
+func ShieldCaseDescriptionGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) *string {
+	return c.description
+}
+
 func (s *ShieldCase[TInput, TOutput]) toAny() ShieldCase[any, any] {
 	return ShieldCase[any, any]{
 		name:        s.name,
@@ -391,8 +407,10 @@ func ShieldRun(shield *Shield, runtimeCfg *ShieldRuntimeConfiguration) ShieldRun
 		TopLevel: make([]ShieldUnitChildOutcome, 0, len(sorted)),
 	}
 
+	tel := &shieldRunTelemetry{atomDurationsNs: make([]float64, 0)}
+
 	for _, unit := range sorted {
-		unitReport := shieldUnitRun(unit, runtimeCfg)
+		unitReport := shieldUnitRun(unit, runtimeCfg, tel)
 		failed := shieldUnitEvaluationFailed(unit, unitReport)
 
 		report.TopLevel = append(report.TopLevel, ShieldUnitChildOutcome{
@@ -410,6 +428,7 @@ func ShieldRun(shield *Shield, runtimeCfg *ShieldRuntimeConfiguration) ShieldRun
 	report.Elapsed = endShield.Sub(startShield)
 
 	logDuration("SHIELD run", report.Elapsed)
+	shieldRunSummaryEmit(report, tel)
 
 	return report
 }
@@ -429,7 +448,7 @@ type shieldAtomCaseOutcome struct {
 	hadPanic             bool
 }
 
-func shieldUnitRun(unit ShieldUnit, runtimeCfg *ShieldRuntimeConfiguration) ShieldUnitRunReport {
+func shieldUnitRun(unit ShieldUnit, runtimeCfg *ShieldRuntimeConfiguration, tel *shieldRunTelemetry) ShieldUnitRunReport {
 	report := ShieldUnitRunReport{Name: unit.name}
 
 	label := fmt.Sprintf("unit %s", shieldUnitFormatLabel(unit))
@@ -459,7 +478,7 @@ func shieldUnitRun(unit ShieldUnit, runtimeCfg *ShieldRuntimeConfiguration) Shie
 	childFailureStopped := false
 
 	for _, subUnit := range sortedSubs {
-		subReport := shieldUnitRun(subUnit, runtimeCfg)
+		subReport := shieldUnitRun(subUnit, runtimeCfg, tel)
 		subFailed := shieldUnitEvaluationFailed(subUnit, subReport)
 
 		report.DirectChildren = append(report.DirectChildren, ShieldUnitChildOutcome{
@@ -484,7 +503,7 @@ func shieldUnitRun(unit ShieldUnit, runtimeCfg *ShieldRuntimeConfiguration) Shie
 
 	if !skipAtoms {
 		for _, atom := range atoms {
-			atomStats := shieldAtomRun(atom, runtimeCfg)
+			atomStats := shieldAtomRun(atom, runtimeCfg, tel)
 
 			if atomStats.setupFailedBeforeCases {
 				report.AtomSetupFailureCount++
@@ -512,7 +531,7 @@ func shieldUnitRun(unit ShieldUnit, runtimeCfg *ShieldRuntimeConfiguration) Shie
 	return report
 }
 
-func shieldAtomRun(atom ShieldAtom[any, any], runtimeCfg *ShieldRuntimeConfiguration) shieldAtomRunStats {
+func shieldAtomRun(atom ShieldAtom[any, any], runtimeCfg *ShieldRuntimeConfiguration, tel *shieldRunTelemetry) shieldAtomRunStats {
 	stats := shieldAtomRunStats{}
 
 	label := fmt.Sprintf("atom %s", shieldAtomFormatLabel(atom))
@@ -559,6 +578,10 @@ func shieldAtomRun(atom ShieldAtom[any, any], runtimeCfg *ShieldRuntimeConfigura
 
 	elapsedAtom := finishedAtom.Sub(startAtom)
 	logDuration(fmt.Sprintf("atom '%s'", atom.name), elapsedAtom)
+
+	if tel != nil {
+		tel.atomDurationsNs = append(tel.atomDurationsNs, float64(elapsedAtom.Nanoseconds()))
+	}
 
 	return stats
 }
