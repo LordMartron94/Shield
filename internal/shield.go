@@ -61,7 +61,7 @@ type ShieldValidator[TInput, TOutput any] func(output TOutput, testCase ShieldCa
 // ------------------------------------------------------------- CONFIGURATION
 
 type ShieldConfiguration struct {
-	units []ShieldUnit // these must be all defined units, usually tied to a (sub-)system
+	units []ShieldUnit
 }
 
 func ShieldConfigurationCreate() *ShieldConfiguration {
@@ -73,6 +73,31 @@ func ShieldConfigurationCreate() *ShieldConfiguration {
 func ShieldConfigurationRegisterUnits(cfg *ShieldConfiguration, units ...ShieldUnit) {
 	cfg.units = append(cfg.units, units...)
 }
+
+// ------------------------------------------------------------- UNIT RUN REPORT
+
+type ShieldUnitChildOutcome struct {
+	Name   string
+	Failed bool
+	Report ShieldUnitRunReport
+}
+
+type ShieldUnitRunReport struct {
+	Name string
+
+	SkippedDueToBlacklist bool
+	SkippedDueToSetup     bool
+
+	AtomSetupFailureCount  int
+	AtomValidationFailures int
+	AtomPanics             int
+
+	TerminatedSubUnitLoopEarly bool
+
+	DirectChildren []ShieldUnitChildOutcome
+}
+
+type ShieldUnitEvaluationGate func(report ShieldUnitRunReport) bool
 
 // ------------------------------------------------------------- UNIT
 
@@ -87,6 +112,10 @@ type ShieldUnit struct {
 
 	setup    func()
 	teardown func()
+
+	stopRemainingSubUnitsOnChildFailure       bool
+	skipOwnAtomsWhenChildFailureStopsSubUnits bool
+	evaluationGate                            ShieldUnitEvaluationGate
 }
 
 func ShieldUnitCreate(order int, name string) *ShieldUnit {
@@ -110,6 +139,18 @@ func ShieldUnitSetDescription(unit *ShieldUnit, description string) {
 	unit.description = &description
 }
 
+func ShieldUnitSetStopRemainingSubUnitsOnChildFailure(unit *ShieldUnit, value bool) {
+	unit.stopRemainingSubUnitsOnChildFailure = value
+}
+
+func ShieldUnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits(unit *ShieldUnit, value bool) {
+	unit.skipOwnAtomsWhenChildFailureStopsSubUnits = value
+}
+
+func ShieldUnitSetEvaluationGate(unit *ShieldUnit, gate ShieldUnitEvaluationGate) {
+	unit.evaluationGate = gate
+}
+
 func ShieldUnitRegisterAtom[TInput, TOutput any](unit *ShieldUnit, atom ShieldAtom[TInput, TOutput]) {
 	unit.atoms = append(unit.atoms, atom.toAny())
 }
@@ -130,6 +171,42 @@ func shieldUnitGetSortedAtoms(unit ShieldUnit) []ShieldAtom[any, any] {
 	})
 
 	return sorted
+}
+
+func shieldUnitGetSortedSubUnits(unit ShieldUnit) []ShieldUnit {
+	return extensions.SortedCopyShallow(unit.subUnits, func(a, b ShieldUnit) int {
+		return cmp.Compare(a.order, b.order)
+	})
+}
+
+func ShieldUnitEvaluationDefaultFailed(report ShieldUnitRunReport) bool {
+	if report.SkippedDueToBlacklist {
+		return false
+	}
+
+	if report.SkippedDueToSetup {
+		return true
+	}
+
+	if report.AtomSetupFailureCount > 0 || report.AtomValidationFailures > 0 || report.AtomPanics > 0 {
+		return true
+	}
+
+	for _, ch := range report.DirectChildren {
+		if ch.Failed {
+			return true
+		}
+	}
+
+	return false
+}
+
+func shieldUnitEvaluationFailed(unit ShieldUnit, report ShieldUnitRunReport) bool {
+	if unit.evaluationGate != nil {
+		return unit.evaluationGate(report)
+	}
+
+	return ShieldUnitEvaluationDefaultFailed(report)
 }
 
 func shieldUnitFormatLabel(unit ShieldUnit) string {
@@ -316,68 +393,141 @@ func ShieldRun(shield *Shield, runtimeCfg *ShieldRuntimeConfiguration) {
 
 // ------------------------------------------------------------- PRIVATE HELPERS
 
-func shieldUnitRun(unit ShieldUnit, runtimeCfg *ShieldRuntimeConfiguration) {
+type shieldAtomRunStats struct {
+	setupFailedBeforeCases bool
+	validationFailures     int
+	panics                 int
+	skipRestOfUnit         bool
+}
+
+type shieldAtomCaseOutcome struct {
+	skipRestOfUnit       bool
+	hadValidationFailure bool
+	hadPanic             bool
+}
+
+func shieldUnitRun(unit ShieldUnit, runtimeCfg *ShieldRuntimeConfiguration) ShieldUnitRunReport {
+	report := ShieldUnitRunReport{Name: unit.name}
+
 	label := fmt.Sprintf("unit %s", shieldUnitFormatLabel(unit))
 
 	if success := runSetup(label, unit.setup); !success {
 		logTemplate("skipping", label)
-		return
+		report.SkippedDueToSetup = true
+
+		return report
 	}
 
-	defer runTeardown(label, unit.setup)
+	defer runTeardown(label, unit.teardown)
 
 	if slices.Contains(runtimeCfg.blacklistedUnits, unit.name) {
 		logTemplate("skipping", label)
-		return
+		report.SkippedDueToBlacklist = true
+
+		return report
 	}
 
 	atoms := shieldUnitGetSortedAtoms(unit)
+	sortedSubs := shieldUnitGetSortedSubUnits(unit)
 
 	logTemplate("starting", label)
 	startUnit := time.Now()
 
-	for _, subUnit := range unit.subUnits {
-		shieldUnitRun(subUnit, runtimeCfg)
-	}
+	childFailureStopped := false
 
-	for _, atom := range atoms {
-		if skipRestOfUnit := shieldAtomRun(atom, runtimeCfg); skipRestOfUnit {
-			echo.On(shieldSystemID).Notice(fmt.Sprintf("skipping rest of unit '%s' in accordance to evaluation result", unit.name))
+	for _, subUnit := range sortedSubs {
+		subReport := shieldUnitRun(subUnit, runtimeCfg)
+		subFailed := shieldUnitEvaluationFailed(subUnit, subReport)
+
+		report.DirectChildren = append(report.DirectChildren, ShieldUnitChildOutcome{
+			Name:   subUnit.name,
+			Failed: subFailed,
+			Report: subReport,
+		})
+
+		if subFailed && unit.stopRemainingSubUnitsOnChildFailure {
+			report.TerminatedSubUnitLoopEarly = true
+			childFailureStopped = true
+
+			echo.On(shieldSystemID).Notice(fmt.Sprintf(
+				"stopping remaining sub-units of '%s' after failed sub-unit '%s' (policy)",
+				unit.name, subUnit.name))
+
 			break
 		}
+	}
+
+	skipAtoms := childFailureStopped && unit.skipOwnAtomsWhenChildFailureStopsSubUnits
+
+	if !skipAtoms {
+		for _, atom := range atoms {
+			atomStats := shieldAtomRun(atom, runtimeCfg)
+
+			if atomStats.setupFailedBeforeCases {
+				report.AtomSetupFailureCount++
+			}
+
+			report.AtomValidationFailures += atomStats.validationFailures
+			report.AtomPanics += atomStats.panics
+
+			if atomStats.skipRestOfUnit {
+				echo.On(shieldSystemID).Notice(fmt.Sprintf("skipping rest of unit '%s' in accordance to evaluation result", unit.name))
+				break
+			}
+		}
+	} else {
+		echo.On(shieldSystemID).Notice(fmt.Sprintf(
+			"skipping atoms of unit '%s' after sub-unit failure (policy)",
+			unit.name))
 	}
 
 	finishedUnit := time.Now()
 	elapsedUnit := finishedUnit.Sub(startUnit)
 
 	logDuration(fmt.Sprintf("unit '%s'", unit.name), elapsedUnit)
+
+	return report
 }
 
-func shieldAtomRun(atom ShieldAtom[any, any], runtimeCfg *ShieldRuntimeConfiguration) (skipRestOfUnit bool) {
+func shieldAtomRun(atom ShieldAtom[any, any], runtimeCfg *ShieldRuntimeConfiguration) shieldAtomRunStats {
+	stats := shieldAtomRunStats{}
+
 	label := fmt.Sprintf("atom %s", shieldAtomFormatLabel(atom))
 
 	if success := runSetup(label, atom.setup); !success {
 		logTemplate("skipping", label)
-		return false
+		stats.setupFailedBeforeCases = true
+
+		return stats
 	}
 
-	defer runTeardown(label, atom.setup)
+	defer runTeardown(label, atom.teardown)
 
 	if slices.Contains(runtimeCfg.blacklistedAtoms, atom.name) {
 		logTemplate("skipping", label)
-		return false
+
+		return stats
 	}
 
 	logTemplate("starting", label)
 
 	startAtom := time.Now()
 
-	skipFurtherProcessing := false
-
 	for _, shieldCase := range atom.cases {
 		logTemplate("running", fmt.Sprintf("case %s", shieldCaseFormatLabel(shieldCase)))
-		if skipRest := atomEvaluateCase(atom, shieldCase); skipRest {
-			skipFurtherProcessing = true
+
+		outcome := atomEvaluateCase(atom, shieldCase)
+
+		if outcome.hadValidationFailure {
+			stats.validationFailures++
+		}
+
+		if outcome.hadPanic {
+			stats.panics++
+		}
+
+		if outcome.skipRestOfUnit {
+			stats.skipRestOfUnit = true
 			break
 		}
 	}
@@ -386,12 +536,15 @@ func shieldAtomRun(atom ShieldAtom[any, any], runtimeCfg *ShieldRuntimeConfigura
 
 	elapsedAtom := finishedAtom.Sub(startAtom)
 	logDuration(fmt.Sprintf("atom '%s'", atom.name), elapsedAtom)
-	return skipFurtherProcessing
+
+	return stats
 }
 
-func atomEvaluateCase(atom ShieldAtom[any, any], shieldCase ShieldCase[any, any]) (skipRestOfUnit bool) {
+func atomEvaluateCase(atom ShieldAtom[any, any], shieldCase ShieldCase[any, any]) (outcome shieldAtomCaseOutcome) {
 	defer func() {
 		if r := recover(); r != nil {
+			outcome.hadPanic = true
+
 			label := fmt.Sprintf("atom '%s' - case '%s'", atom.name, shieldCase.name)
 			stack := debug.Stack()
 			failureMsg := fmt.Sprintf("panic recovered: %v\nStack trace:\n%s", r, stack)
@@ -404,11 +557,15 @@ func atomEvaluateCase(atom ShieldAtom[any, any], shieldCase ShieldCase[any, any]
 	validated := atom.validator(output, shieldCase)
 
 	if !validated.success {
+		outcome.hadValidationFailure = true
+
 		failureMessage := shieldAtomResultFormat(atom, validated)
 		logFailure(failureMessage)
 	}
 
-	return validated.skipFurtherAtomsInUnit
+	outcome.skipRestOfUnit = validated.skipFurtherAtomsInUnit
+
+	return outcome
 }
 
 func logTemplate(action, label string) {

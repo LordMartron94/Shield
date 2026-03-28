@@ -11,11 +11,13 @@ Shield is not a substitute for Go’s `testing` package or a full test runner wi
 | Concept | Role |
 | -------- | ------ |
 | **Configuration** | Top-level list of units you pass to `EngineCreate`. |
-| **Unit** | Named group with an `order` field (lower runs first among siblings). Can contain atoms and **sub-units**. |
+| **Unit** | Named group with an `order` field (lower runs first among siblings). Can contain **sub-units** (run first, also ordered) then **atoms**. |
 | **Atom** | One check: a `Runner`, a `Validator`, and registered **cases**. Also ordered by `order`. |
 | **Case** | Named `input` / `expected` pair for one run of the atom’s runner. |
 | **Engine** | Runnable snapshot built from a `Configuration`. |
 | **RuntimeConfiguration** | Blacklists units and/or atoms by **exact name** (see `docs/adr/0001-Runtime-Configuration-Filtering.md`). |
+| **UnitRunReport** | Filled after a unit runs: skips, atom stats, child outcomes. Fed to `UnitEvaluationGate`. |
+| **UnitEvaluationGate** | `func(UnitRunReport) bool` — return `true` if the unit counts as **failed** (for parents and stop-on-child). |
 
 Validators return an `AtomResult` **by value**. Helpers return pointers; dereference when returning, for example `return *shield.AtomResultFailureCreate("reason")`. Use `AtomResultSetSkipFurtherAtomsInUnit` to stop running later atoms in the **current** unit after the current atom completes.
 
@@ -61,9 +63,10 @@ Adjust imports if your `go.mod` uses a module path other than `shield` (for exam
 
 ## Behaviour notes
 
-- **Ordering**: Units and atoms are sorted by their `order` field before execution. Cases run in registration order.
+- **Ordering**: Top-level units, sub-units under a parent, and atoms within a unit are sorted by `order` before execution. Cases run in registration order.
 - **Panics**: Runner, validator, setup, and teardown panics are recovered and logged; they do not crash the process.
-- **Sub-units**: Register with `UnitRegisterSubUnits`. A sub-unit cannot use the same `name` as its parent (registration panics).
+- **Sub-units**: Register with `UnitRegisterSubUnits`. A sub-unit cannot use the same `name` as its parent (registration panics). Nesting is recursive; each unit’s gate sees its own `DirectChildren` with full nested `Report` values.
+- **Dependencies between sibling sub-units**: Call `UnitSetStopRemainingSubUnitsOnChildFailure(parent, true)` so a failed sub-unit skips later siblings. If the parent’s own atoms also depend on those sub-units, add `UnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits(parent, true)`. Default failure classification is `UnitEvaluationDefaultFailed` (override with `UnitSetEvaluationGate`). Blacklist skips are not treated as failure.
 - **Output**: `Run` does not return a consolidated pass/fail value; use echo output or wrap the harness if you need exit codes.
 
 ## Repository layout

@@ -44,6 +44,25 @@ the same name as their parent; that situation panics at registration time.
 type Unit = internal.ShieldUnit
 
 /*
+UnitRunReport summarizes one execution of a unit: blacklist/setup skips, atom failures
+(including setup failures before cases), panics, and direct child outcomes in run order.
+Custom evaluation gates receive this after the unit finishes the work it was scheduled to perform.
+*/
+type UnitRunReport = internal.ShieldUnitRunReport
+
+/*
+UnitChildOutcome binds a direct sub-unit’s name to whether it was classified as failed and its full report.
+*/
+type UnitChildOutcome = internal.ShieldUnitChildOutcome
+
+/*
+UnitEvaluationGate classifies a finished unit run. Return true when the unit should count as failed
+for parents (default logic) and when deciding stop-on-child policies. Nil on a unit restores
+UnitEvaluationDefaultFailed.
+*/
+type UnitEvaluationGate = internal.ShieldUnitEvaluationGate
+
+/*
 RuntimeConfiguration selects which units and atoms to skip by exact name match.
 Blacklists only; see ADR 0001 in docs/adr.
 */
@@ -77,9 +96,9 @@ func AtomResultSetNote(result *AtomResult, note string) {
 }
 
 /*
-AtomResultSetSkipFurtherAtomsInUnit, when set true on a validation result, stops running
-remaining atoms in the same unit after the current atom finishes (sub-units already run
-are unaffected; this applies to the atom loop only).
+AtomResultSetSkipFurtherAtomsInUnit when set true on a validation result, stops running
+remaining atoms in the same unit after the current atom finishes. Sub-units run before
+atoms; this flag does not affect sub-units that already completed.
 */
 func AtomResultSetSkipFurtherAtomsInUnit(result *AtomResult, value bool) {
 	internal.ShieldAtomResultSetSkipFurtherAtomsInUnit(result, value)
@@ -121,6 +140,41 @@ UnitSetDescription sets optional human-readable text included in log labels.
 */
 func UnitSetDescription(unit *Unit, description string) {
 	internal.ShieldUnitSetDescription(unit, description)
+}
+
+/*
+UnitSetStopRemainingSubUnitsOnChildFailure enables skipping remaining direct sub-units (by order)
+after the first sub-unit whose gate reports failure. Recursive: each sub-unit uses its own gate
+on its own report. Default false.
+*/
+func UnitSetStopRemainingSubUnitsOnChildFailure(unit *Unit, value bool) {
+	internal.ShieldUnitSetStopRemainingSubUnitsOnChildFailure(unit, value)
+}
+
+/*
+UnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits when true together with stop-on-child, skips this
+unit’s atoms after the sub-unit loop ends early due to a failed child. Use this when sibling sub-units
+model dependencies (e.g. database then behaviour). Default false.
+*/
+func UnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits(unit *Unit, value bool) {
+	internal.ShieldUnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits(unit, value)
+}
+
+/*
+UnitSetEvaluationGate sets how this unit’s run is classified as failed or not. Nil uses
+UnitEvaluationDefaultFailed (setup skip, atom setup/validation/panic failures, or any failed direct child;
+blacklist-only skip is not a failure).
+*/
+func UnitSetEvaluationGate(unit *Unit, gate UnitEvaluationGate) {
+	internal.ShieldUnitSetEvaluationGate(unit, gate)
+}
+
+/*
+UnitEvaluationDefaultFailed is the built-in classifier; useful when composing custom gates
+(e.g. extra conditions then fall back to default).
+*/
+func UnitEvaluationDefaultFailed(report UnitRunReport) bool {
+	return internal.ShieldUnitEvaluationDefaultFailed(report)
 }
 
 /*
