@@ -1,4 +1,73 @@
-# SHIELD
+# shield
 
-Shield is the first line of defense against bad code. It protects against regressions, unfinished features, invariant violations, etc.
+Shield is a structured harness for regression checks, invariants, and unfinished-feature guards. You describe **units** (coarse groupings), **atoms** (ordered checks inside a unit), and **cases** (inputs and expected outputs). The library runs them in deterministic order and reports through **echo** (log prefix `Shield`).
 
+## What it is not
+
+Shield is not a substitute for Go’s `testing` package or a full test runner with assertions libraries. It is an explicit graph of named checks with runner/validator functions, optional setup/teardown, and runtime name-based filtering.
+
+## Core concepts
+
+| Concept | Role |
+| -------- | ------ |
+| **Configuration** | Top-level list of units you pass to `EngineCreate`. |
+| **Unit** | Named group with an `order` field (lower runs first among siblings). Can contain atoms and **sub-units**. |
+| **Atom** | One check: a `Runner`, a `Validator`, and registered **cases**. Also ordered by `order`. |
+| **Case** | Named `input` / `expected` pair for one run of the atom’s runner. |
+| **Engine** | Runnable snapshot built from a `Configuration`. |
+| **RuntimeConfiguration** | Blacklists units and/or atoms by **exact name** (see `docs/adr/0001-Runtime-Configuration-Filtering.md`). |
+
+Validators return an `AtomResult` **by value**. Helpers return pointers; dereference when returning, for example `return *shield.AtomResultFailureCreate("reason")`. Use `AtomResultSetSkipFurtherAtomsInUnit` to stop running later atoms in the **current** unit after the current atom completes.
+
+## Public API
+
+All symbols live in the `shield` package (`api.go`, `doc.go`). Implementation details stay in `shield/internal`.
+
+Browse documentation:
+
+```bash
+cd tools/shield && go doc -all .
+```
+
+## Minimal usage sketch
+
+```go
+package main
+
+import "shield"
+
+func main() {
+    cfg := shield.ConfigurationCreate()
+
+    unit := shield.UnitCreate(0, "example")
+    atom := shield.AtomCreate(0, "equals_self", func(in int) int { return in },
+        func(out int, c shield.Case[int, int]) shield.AtomResult {
+            if out == c.expected {
+                return *shield.AtomResultSuccessCreate()
+            }
+            return *shield.AtomResultFailureCreate("output != expected")
+        })
+    shield.AtomRegisterCase(atom, shield.CaseCreate("identity", 42, 42))
+    shield.UnitRegisterAtom(unit, atom)
+    shield.ConfigurationRegisterUnits(cfg, *unit)
+
+    engine := shield.EngineCreate(*cfg)
+    rt := shield.RuntimeConfigurationCreate(nil, nil)
+    shield.Run(engine, rt)
+}
+```
+
+Adjust imports if your `go.mod` uses a module path other than `shield` (for example a vanity import or workspace replace).
+
+## Behaviour notes
+
+- **Ordering**: Units and atoms are sorted by their `order` field before execution. Cases run in registration order.
+- **Panics**: Runner, validator, setup, and teardown panics are recovered and logged; they do not crash the process.
+- **Sub-units**: Register with `UnitRegisterSubUnits`. A sub-unit cannot use the same `name` as its parent (registration panics).
+- **Output**: `Run` does not return a consolidated pass/fail value; use echo output or wrap the harness if you need exit codes.
+
+## Repository layout
+
+- `api.go` — public types and functions (thin wrappers over `internal`).
+- `internal/` — execution engine and echo registration.
+- `docs/adr/` — architecture decisions (filtering, testing stance, etc.).
