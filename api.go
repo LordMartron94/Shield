@@ -2,7 +2,9 @@ package shield
 
 import (
 	"fmt"
+	"os"
 	"shield/internal"
+	"strings"
 )
 
 /*
@@ -80,13 +82,17 @@ Engine is the runnable graph built from a frozen Configuration.
 type Engine = internal.Shield
 
 /*
-RunReport is the outcome of Run: wall-clock Elapsed, whether any top-level unit Failed
+RunReport is the core outcome of Run: wall-clock Elapsed, whether any top-level unit Failed
 (per that unit’s evaluation gate or default), and TopLevel entries in execution order
 each carrying the unit name, Failed flag, and full nested UnitRunReport tree.
-WrittenReportPath is set when RunWithReportPersistence wrote at least one file successfully
-(primary artifact: JSON path if JSON was written, otherwise the text path).
 */
 type RunReport = internal.ShieldRunReport
+
+/*
+RunOutcome wraps RunReport with side-effect artifacts produced by adapters (for example
+WrittenReportPath when persistence wrote at least one file successfully).
+*/
+type RunOutcome = internal.ShieldRunOutcome
 
 /*
 ReportPersistence configures optional on-disk reports under a directory (see RunWithReportPersistence).
@@ -121,9 +127,14 @@ is above an internal epsilon (otherwise zero and omitted from JSON via omitempty
 type RunMetrics = internal.ShieldRunMetrics
 
 /*
-ReportPersistAdapter writes RunReport and RunMetrics to outputDir; return the primary path for RunReport.WrittenReportPath.
+ReportPersistAdapter writes RunReport and RunMetrics to outputDir; return the primary path for RunOutcome.WrittenReportPath.
 */
 type ReportPersistAdapter = internal.ShieldReportPersistAdapter
+
+/*
+ReportDocument is the shared persisted schema used by built-in writers and CLI readers.
+*/
+type ReportDocument = internal.ShieldReportDocument
 
 /*
 CLIHarnessBuilder builds a Shield configuration for the interactive Shield CLI run command.
@@ -176,6 +187,19 @@ func ReportPersistenceCreate(outputDir string) *ReportPersistence {
 }
 
 /*
+ReportPersistenceCreateFromEnv returns persistence state using outputDir unless SHIELD_RESULTS_DIR is set.
+This keeps environment policy at the composition edge instead of internal persistence code.
+*/
+func ReportPersistenceCreateFromEnv(outputDir string) *ReportPersistence {
+	envOutputDir := strings.TrimSpace(os.Getenv("SHIELD_RESULTS_DIR"))
+	if envOutputDir != "" {
+		outputDir = envOutputDir
+	}
+
+	return internal.ShieldReportPersistenceCreate(outputDir)
+}
+
+/*
 ReportPersistenceSetEnabled turns disk persistence on or off. When false, RunWithReportPersistence
 behaves like Run for I/O.
 */
@@ -195,6 +219,13 @@ ReportPersistenceSetAdapter registers a custom writer; nil clears it and restore
 */
 func ReportPersistenceSetAdapter(p *ReportPersistence, adapter ReportPersistAdapter) {
 	internal.ShieldReportPersistenceSetAdapter(p, adapter)
+}
+
+/*
+ReportDocumentRead parses persisted JSON report documents from path.
+*/
+func ReportDocumentRead(path string) (ReportDocument, error) {
+	return internal.ShieldReportDocumentRead(path)
 }
 
 /*
@@ -446,6 +477,6 @@ func RunWithReportPersistence(
 	engine *Engine,
 	runtimeCfg *RuntimeConfiguration,
 	persist *ReportPersistence,
-) RunReport {
+) RunOutcome {
 	return internal.ShieldRunWithPersistence(engine, runtimeCfg, persist)
 }

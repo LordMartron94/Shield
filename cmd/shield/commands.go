@@ -95,23 +95,23 @@ func shieldCliRegisterRunCommands() {
 		engine := shield.EngineCreate(*cfg)
 		runtimeCfg := shield.RuntimeConfigurationCreate(unitBlacklist, atomBlacklist)
 
-		persist := shield.ReportPersistenceCreate(outDirRaw)
+		persist := shield.ReportPersistenceCreateFromEnv(outDirRaw)
 		shield.ReportPersistenceSetEnabled(persist, persistEnabled)
 		shield.ReportPersistenceSetMode(persist, shieldCliPersistenceModeParse(modeRaw))
 
-		report := shield.RunWithReportPersistence(engine, runtimeCfg, persist)
-		state.lastResult = report.WrittenReportPath
-		state.resultsDir = outDirRaw
+		outcome := shield.RunWithReportPersistence(engine, runtimeCfg, persist)
+		state.lastResult = outcome.WrittenReportPath
+		state.resultsDir = shieldCliResultDirResolve(outDirRaw)
 
 		if target != "" {
 			fmt.Println(shieldCliColor("target:", ansiCyan), target)
 		}
 
-		if report.WrittenReportPath != "" {
-			fmt.Println(shieldCliColor("report:", ansiCyan), report.WrittenReportPath)
+		if outcome.WrittenReportPath != "" {
+			fmt.Println(shieldCliColor("report:", ansiCyan), outcome.WrittenReportPath)
 		}
 
-		if report.Failed {
+		if outcome.Report.Failed {
 			fmt.Println(shieldCliColorBold("run result: failed", ansiRed))
 			return
 		}

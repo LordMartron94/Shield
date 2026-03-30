@@ -2,10 +2,10 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"shield"
 	"sort"
 	"strings"
 	"time"
@@ -17,13 +17,6 @@ const (
 	shieldCliDefaultResultsDir = "results/tests"
 )
 
-type shieldCliResultDocument struct {
-	SchemaVersion int    `json:"schema_version"`
-	WrittenAt     string `json:"written_at"`
-	RunFailed     bool   `json:"run_failed"`
-	ElapsedNs     int64  `json:"elapsed_ns"`
-}
-
 type shieldCliResultFileMeta struct {
 	Path      string
 	Name      string
@@ -33,9 +26,17 @@ type shieldCliResultFileMeta struct {
 	ModTime   time.Time
 }
 
-func shieldCliResultsDirResolve() string {
+func shieldCliResultDirResolve(defaultDir string) string {
 	env := strings.TrimSpace(os.Getenv("SHIELD_RESULTS_DIR"))
-	return env
+	if env != "" {
+		return env
+	}
+
+	return defaultDir
+}
+
+func shieldCliResultsDirResolve() string {
+	return shieldCliResultDirResolve("")
 }
 
 func shieldCliResultFilesList(resultsDir string) ([]shieldCliResultFileMeta, error) {
@@ -95,18 +96,8 @@ func shieldCliResultFilesList(resultsDir string) ([]shieldCliResultFileMeta, err
 	return items, nil
 }
 
-func shieldCliResultFileReadMeta(path string) (shieldCliResultDocument, error) {
-	payload, err := os.ReadFile(path)
-	if err != nil {
-		return shieldCliResultDocument{}, err
-	}
-
-	var doc shieldCliResultDocument
-	if err := json.Unmarshal(payload, &doc); err != nil {
-		return shieldCliResultDocument{}, err
-	}
-
-	return doc, nil
+func shieldCliResultFileReadMeta(path string) (shield.ReportDocument, error) {
+	return shield.ReportDocumentRead(path)
 }
 
 func shieldCliResultFileSelect(resultsDir, selector string) (shieldCliResultFileMeta, error) {

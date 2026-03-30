@@ -42,9 +42,11 @@ Typical flow:
     UnitSetEvaluationGate on units that model dependencies.
  4. EngineCreate(configuration), report := Run(engine, runtimeConfiguration); use report.Failed
     and report.TopLevel for exit codes or CI without scraping logs.
- 5. Optional: ReportPersistenceCreate(outputDir), ReportPersistenceSetEnabled(true),
+ 5. Optional: ReportPersistenceCreate(outputDir) or ReportPersistenceCreateFromEnv(outputDir),
+    ReportPersistenceSetEnabled(true),
     ReportPersistenceSetMode(ReportPersistenceModeJSON|TXT|JSONAndTXT), or ReportPersistenceSetAdapter
-    for a custom persister, then RunWithReportPersistence. Persisted JSON uses schema_version
+    for a custom persister, then RunWithReportPersistence (returns RunOutcome with Report + written path).
+    Persisted JSON uses schema_version
     ReportDocumentSchemaVersion (2 adds extended duration aggregates); see README for filename pattern
     and limitations (no per-atom rows; quartiles/tail percentiles are noisy for very small n).
  6. Optional CLI flow: register CLIHarnessBuilderRegister(func() (*Configuration, error) { ... }),

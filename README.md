@@ -15,7 +15,8 @@ Shield is not a substitute for Go’s `testing` package or a full test runner wi
 | **Atom** | One check: a `Runner`, a `Validator`, and registered **cases**. Also ordered by `order`. |
 | **Case** | Named input for one run of the atom’s runner, with optional expected output. |
 | **Engine** | Runnable snapshot built from a `Configuration`. |
-| **RunReport** | Returned by `Run` / `RunWithReportPersistence`: `Failed`, `Elapsed`, `TopLevel`, optional `WrittenReportPath` when persistence wrote a file. |
+| **RunReport** | Returned by `Run`: `Failed`, `Elapsed`, `TopLevel` with nested unit outcomes. |
+| **RunOutcome** | Returned by `RunWithReportPersistence`: wraps `Report` (`RunReport`) and optional `WrittenReportPath` when persistence wrote a file. |
 | **ReportPersistence** | Output directory, enable flag, `ReportPersistenceMode` (JSON / TXT / JSONAndTXT), or custom `ReportPersistAdapter`. |
 | **ReportPersistenceMode** | Built-in writers: `ReportPersistenceModeJSON`, `ReportPersistenceModeTXT`, `ReportPersistenceModeJSONAndTXT`. |
 | **RunMetrics** | Snapshot passed to `ReportPersistAdapter` (aggregates + atom timing stats). |
@@ -167,11 +168,11 @@ Adjust imports if your `go.mod` uses a module path other than `shield` (for exam
 
 ## Persisting run reports
 
-Use `ReportPersistenceCreate(dir)`, `ReportPersistenceSetEnabled(true)`, `ReportPersistenceSetMode` with `ReportPersistenceModeJSON`, `ReportPersistenceModeTXT`, or `ReportPersistenceModeJSONAndTXT` (default after create is JSON), then `RunWithReportPersistence(engine, rt, persist)`. For a custom writer, `ReportPersistenceSetAdapter(persist, func(dir string, report shield.RunReport, metrics shield.RunMetrics) (string, error) { ... })`; when set, **mode is ignored**. The directory is created with mode `0750`; built-in files use mode `0640`.
+Use `ReportPersistenceCreate(dir)` or `ReportPersistenceCreateFromEnv(dir)`, `ReportPersistenceSetEnabled(true)`, `ReportPersistenceSetMode` with `ReportPersistenceModeJSON`, `ReportPersistenceModeTXT`, or `ReportPersistenceModeJSONAndTXT` (default after create is JSON), then `RunWithReportPersistence(engine, rt, persist)`. For a custom writer, `ReportPersistenceSetAdapter(persist, func(dir string, report shield.RunReport, metrics shield.RunMetrics) (string, error) { ... })`; when set, **mode is ignored**. The directory is created with mode `0750`; built-in files use mode `0640`.
 
 - **Filenames**: `shield-run-YYYYMMDD-hhmmss.nnnnnnnnn.json` (or `.txt`), UTC wall time from the metrics snapshot. If that name exists, `_1`, `_2`, … are inserted before the extension (up to 1000 attempts).
 - **JSON**: `schema_version` is `ReportDocumentSchemaVersion` (currently 2). The document includes `written_at`, `run_failed`, `elapsed_ns`, a **summary** block (aggregate counts + optional `duration` object: mean/stddev/min/max, sum, median, Q1/Q3, IQR, p95/p99, human-readable strings for mean/min/max/median/p95/p99, and `coeff_var_pop` when computed), and a **tree** mirroring top-level units and nested `UnitRunReport` data. Per-atom / per-case rows are not included (aggregates only).
-- **Primary path**: On success, `RunReport.WrittenReportPath` is the JSON path when JSON was written, otherwise the text path. Write errors are logged via echo and do not fail the run.
+- **Primary path**: On success, `RunOutcome.WrittenReportPath` is the JSON path when JSON was written, otherwise the text path. Write errors are logged via echo and do not fail the run.
 
 ## Repository layout
 

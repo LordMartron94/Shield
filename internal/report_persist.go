@@ -38,11 +38,6 @@ type ShieldReportPersistence struct {
 }
 
 func ShieldReportPersistenceCreate(outputDir string) *ShieldReportPersistence {
-	envOutputDir := strings.TrimSpace(os.Getenv("SHIELD_RESULTS_DIR"))
-	if envOutputDir != "" {
-		outputDir = envOutputDir
-	}
-
 	return &ShieldReportPersistence{
 		outputDir: outputDir,
 		enabled:   false,
@@ -80,7 +75,7 @@ func ShieldReportPersistenceSetAdapter(p *ShieldReportPersistence, adapter Shiel
 	p.adapter = adapter
 }
 
-type shieldReportDurationSummary struct {
+type ShieldReportDurationSummary struct {
 	AtomsTimed  int     `json:"atoms_timed"`
 	MeanNs      float64 `json:"mean_ns"`
 	StddevPopNs float64 `json:"stddev_pop_ns"`
@@ -103,7 +98,7 @@ type shieldReportDurationSummary struct {
 	StatsError  string  `json:"stats_error,omitempty"`
 }
 
-type shieldReportSummaryJSON struct {
+type ShieldReportSummary struct {
 	UnitsVisited           int                          `json:"units_visited"`
 	UnitsSkippedBlacklist  int                          `json:"units_skipped_blacklist"`
 	UnitsSkippedSetup      int                          `json:"units_skipped_setup"`
@@ -112,44 +107,44 @@ type shieldReportSummaryJSON struct {
 	AtomSetupFailures      int                          `json:"atom_setup_failures"`
 	SubUnitLoopEarlyStops  int                          `json:"subunit_loop_early_stops"`
 	UnitsFailedGate        int                          `json:"units_failed_gate"`
-	Duration               *shieldReportDurationSummary `json:"duration,omitempty"`
+	Duration               *ShieldReportDurationSummary `json:"duration,omitempty"`
 }
 
-type shieldReportUnitReportJSON struct {
-	Name                       string                      `json:"name"`
-	SkippedDueToBlacklist      bool                        `json:"skipped_due_to_blacklist"`
-	SkippedDueToSetup          bool                        `json:"skipped_due_to_setup"`
-	AtomSetupFailureCount      int                         `json:"atom_setup_failure_count"`
-	AtomValidationFailures     int                         `json:"atom_validation_failures"`
-	AtomPanics                 int                         `json:"atom_panics"`
-	TerminatedSubUnitLoopEarly bool                        `json:"terminated_subunit_loop_early"`
-	DirectChildren             []shieldReportChildNodeJSON `json:"direct_children"`
+type ShieldReportUnitReport struct {
+	Name                       string                  `json:"name"`
+	SkippedDueToBlacklist      bool                    `json:"skipped_due_to_blacklist"`
+	SkippedDueToSetup          bool                    `json:"skipped_due_to_setup"`
+	AtomSetupFailureCount      int                     `json:"atom_setup_failure_count"`
+	AtomValidationFailures     int                     `json:"atom_validation_failures"`
+	AtomPanics                 int                     `json:"atom_panics"`
+	TerminatedSubUnitLoopEarly bool                    `json:"terminated_subunit_loop_early"`
+	DirectChildren             []ShieldReportChildNode `json:"direct_children"`
 }
 
-type shieldReportChildNodeJSON struct {
-	Name   string                     `json:"name"`
-	Failed bool                       `json:"failed"`
-	Report shieldReportUnitReportJSON `json:"report"`
+type ShieldReportChildNode struct {
+	Name   string                 `json:"name"`
+	Failed bool                   `json:"failed"`
+	Report ShieldReportUnitReport `json:"report"`
 }
 
-type shieldReportTopNodeJSON struct {
-	Name   string                     `json:"name"`
-	Failed bool                       `json:"failed"`
-	Report shieldReportUnitReportJSON `json:"report"`
+type ShieldReportTopNode struct {
+	Name   string                 `json:"name"`
+	Failed bool                   `json:"failed"`
+	Report ShieldReportUnitReport `json:"report"`
 }
 
-type shieldReportDocument struct {
-	SchemaVersion int                       `json:"schema_version"`
-	WrittenAt     string                    `json:"written_at"`
-	RunFailed     bool                      `json:"run_failed"`
-	ElapsedNs     int64                     `json:"elapsed_ns"`
-	ElapsedHuman  string                    `json:"elapsed_human"`
-	Summary       shieldReportSummaryJSON   `json:"summary"`
-	Tree          []shieldReportTopNodeJSON `json:"tree"`
+type ShieldReportDocument struct {
+	SchemaVersion int                   `json:"schema_version"`
+	WrittenAt     string                `json:"written_at"`
+	RunFailed     bool                  `json:"run_failed"`
+	ElapsedNs     int64                 `json:"elapsed_ns"`
+	ElapsedHuman  string                `json:"elapsed_human"`
+	Summary       ShieldReportSummary   `json:"summary"`
+	Tree          []ShieldReportTopNode `json:"tree"`
 }
 
-func shieldReportUnitReportToJSON(r ShieldUnitRunReport) shieldReportUnitReportJSON {
-	out := shieldReportUnitReportJSON{
+func shieldReportUnitReportMapFromRun(r ShieldUnitRunReport) ShieldReportUnitReport {
+	out := ShieldReportUnitReport{
 		Name:                       r.Name,
 		SkippedDueToBlacklist:      r.SkippedDueToBlacklist,
 		SkippedDueToSetup:          r.SkippedDueToSetup,
@@ -157,28 +152,28 @@ func shieldReportUnitReportToJSON(r ShieldUnitRunReport) shieldReportUnitReportJ
 		AtomValidationFailures:     r.AtomValidationFailures,
 		AtomPanics:                 r.AtomPanics,
 		TerminatedSubUnitLoopEarly: r.TerminatedSubUnitLoopEarly,
-		DirectChildren:             make([]shieldReportChildNodeJSON, 0, len(r.DirectChildren)),
+		DirectChildren:             make([]ShieldReportChildNode, 0, len(r.DirectChildren)),
 	}
 
 	for _, ch := range r.DirectChildren {
-		out.DirectChildren = append(out.DirectChildren, shieldReportChildNodeJSON{
+		out.DirectChildren = append(out.DirectChildren, ShieldReportChildNode{
 			Name:   ch.Name,
 			Failed: ch.Failed,
-			Report: shieldReportUnitReportToJSON(ch.Report),
+			Report: shieldReportUnitReportMapFromRun(ch.Report),
 		})
 	}
 
 	return out
 }
 
-func shieldReportBuildDocument(report ShieldRunReport, metrics ShieldRunMetrics) shieldReportDocument {
-	doc := shieldReportDocument{
+func ShieldReportDocumentMapFromRun(report ShieldRunReport, metrics ShieldRunMetrics) ShieldReportDocument {
+	doc := ShieldReportDocument{
 		SchemaVersion: shieldReportSchemaVersion,
 		WrittenAt:     metrics.WallTime.Format("2006-01-02T15:04:05.999999999Z07:00"),
 		RunFailed:     report.Failed,
 		ElapsedNs:     report.Elapsed.Nanoseconds(),
 		ElapsedHuman:  formatting.FormatDurationNSF64(float64(report.Elapsed.Nanoseconds())),
-		Summary: shieldReportSummaryJSON{
+		Summary: ShieldReportSummary{
 			UnitsVisited:           metrics.Aggregates.UnitsVisited,
 			UnitsSkippedBlacklist:  metrics.Aggregates.UnitsSkippedBlacklist,
 			UnitsSkippedSetup:      metrics.Aggregates.UnitsSkippedSetup,
@@ -188,11 +183,11 @@ func shieldReportBuildDocument(report ShieldRunReport, metrics ShieldRunMetrics)
 			SubUnitLoopEarlyStops:  metrics.Aggregates.SubUnitLoopEarlyStops,
 			UnitsFailedGate:        metrics.Aggregates.UnitsFailedGate,
 		},
-		Tree: make([]shieldReportTopNodeJSON, 0, len(report.TopLevel)),
+		Tree: make([]ShieldReportTopNode, 0, len(report.TopLevel)),
 	}
 
 	if metrics.AtomsTimedN > 0 {
-		ds := &shieldReportDurationSummary{
+		ds := &ShieldReportDurationSummary{
 			AtomsTimed:  metrics.AtomsTimedN,
 			MeanNs:      metrics.MeanNs,
 			StddevPopNs: metrics.StddevPopNs,
@@ -225,10 +220,10 @@ func shieldReportBuildDocument(report ShieldRunReport, metrics ShieldRunMetrics)
 	}
 
 	for _, tl := range report.TopLevel {
-		doc.Tree = append(doc.Tree, shieldReportTopNodeJSON{
+		doc.Tree = append(doc.Tree, ShieldReportTopNode{
 			Name:   tl.Name,
 			Failed: tl.Failed,
-			Report: shieldReportUnitReportToJSON(tl.Report),
+			Report: shieldReportUnitReportMapFromRun(tl.Report),
 		})
 	}
 
@@ -270,7 +265,7 @@ func shieldRunReportWrite(persist *ShieldReportPersistence, report ShieldRunRepo
 		return path
 	}
 
-	doc := shieldReportBuildDocument(report, metrics)
+	doc := ShieldReportDocumentMapFromRun(report, metrics)
 
 	stem := shieldReportFileStem(metrics.WallTime)
 
@@ -278,7 +273,7 @@ func shieldRunReportWrite(persist *ShieldReportPersistence, report ShieldRunRepo
 
 	switch persist.mode {
 	case ShieldReportPersistenceModeJSON:
-		path, err := shieldReportWriteJSON(dir, stem, doc)
+		path, err := shieldReportPersistWriteJSON(dir, stem, doc)
 		if err != nil {
 			echo.On(shieldSystemID).Error(fmt.Sprintf("shield report persistence: write json: %v", err))
 
@@ -288,7 +283,7 @@ func shieldRunReportWrite(persist *ShieldReportPersistence, report ShieldRunRepo
 		primaryPath = path
 
 	case ShieldReportPersistenceModeTXT:
-		path, err := shieldReportWriteTXT(dir, stem, doc)
+		path, err := shieldReportPersistWriteTXT(dir, stem, doc)
 		if err != nil {
 			echo.On(shieldSystemID).Error(fmt.Sprintf("shield report persistence: write txt: %v", err))
 
@@ -298,7 +293,7 @@ func shieldRunReportWrite(persist *ShieldReportPersistence, report ShieldRunRepo
 		primaryPath = path
 
 	case ShieldReportPersistenceModeJSONAndTXT:
-		pathJ, err := shieldReportWriteJSON(dir, stem, doc)
+		pathJ, err := shieldReportPersistWriteJSON(dir, stem, doc)
 		if err != nil {
 			echo.On(shieldSystemID).Error(fmt.Sprintf("shield report persistence: write json: %v", err))
 
@@ -307,7 +302,7 @@ func shieldRunReportWrite(persist *ShieldReportPersistence, report ShieldRunRepo
 
 		primaryPath = pathJ
 
-		pathT, err := shieldReportWriteTXT(dir, stem, doc)
+		pathT, err := shieldReportPersistWriteTXT(dir, stem, doc)
 		if err != nil {
 			echo.On(shieldSystemID).Error(fmt.Sprintf("shield report persistence: write txt: %v", err))
 
@@ -317,7 +312,7 @@ func shieldRunReportWrite(persist *ShieldReportPersistence, report ShieldRunRepo
 		_ = pathT
 
 	default:
-		path, err := shieldReportWriteJSON(dir, stem, doc)
+		path, err := shieldReportPersistWriteJSON(dir, stem, doc)
 		if err != nil {
 			echo.On(shieldSystemID).Error(fmt.Sprintf("shield report persistence: write json: %v", err))
 
@@ -330,7 +325,7 @@ func shieldRunReportWrite(persist *ShieldReportPersistence, report ShieldRunRepo
 	return primaryPath
 }
 
-func shieldReportWriteJSON(dir, stem string, doc shieldReportDocument) (string, error) {
+func shieldReportPersistWriteJSON(dir, stem string, doc ShieldReportDocument) (string, error) {
 	base := stem + ".json"
 
 	path, f, err := shieldReportOpenExclusive(dir, base)
@@ -340,7 +335,7 @@ func shieldReportWriteJSON(dir, stem string, doc shieldReportDocument) (string, 
 
 	defer f.Close()
 
-	payload, err := json.MarshalIndent(doc, "", "  ")
+	payload, err := shieldReportDocumentSerializeJSON(doc)
 	if err != nil {
 		return "", err
 	}
@@ -352,7 +347,7 @@ func shieldReportWriteJSON(dir, stem string, doc shieldReportDocument) (string, 
 	return path, nil
 }
 
-func shieldReportWriteTXT(dir, stem string, doc shieldReportDocument) (string, error) {
+func shieldReportPersistWriteTXT(dir, stem string, doc ShieldReportDocument) (string, error) {
 	base := stem + ".txt"
 
 	path, f, err := shieldReportOpenExclusive(dir, base)
@@ -362,7 +357,7 @@ func shieldReportWriteTXT(dir, stem string, doc shieldReportDocument) (string, e
 
 	defer f.Close()
 
-	_, err = f.WriteString(shieldReportFormatTXT(doc))
+	_, err = f.WriteString(shieldReportDocumentFormatTXT(doc))
 
 	return path, err
 }
@@ -391,7 +386,7 @@ func shieldReportOpenExclusive(dir, base string) (path string, f *os.File, err e
 	return "", nil, fmt.Errorf("could not create unique file under %s", dir)
 }
 
-func shieldReportFormatTXT(doc shieldReportDocument) string {
+func shieldReportDocumentFormatTXT(doc ShieldReportDocument) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Shield run report (schema %d)\n", doc.SchemaVersion)
@@ -440,7 +435,7 @@ func shieldReportFormatTXT(doc shieldReportDocument) string {
 	return b.String()
 }
 
-func shieldReportWriteTXTUnit(b *strings.Builder, name string, failed bool, r shieldReportUnitReportJSON, depth int) {
+func shieldReportWriteTXTUnit(b *strings.Builder, name string, failed bool, r ShieldReportUnitReport, depth int) {
 	ind := strings.Repeat("  ", depth)
 
 	fmt.Fprintf(b, "%s- %s (failed=%v)\n", ind, name, failed)
@@ -451,4 +446,22 @@ func shieldReportWriteTXTUnit(b *strings.Builder, name string, failed bool, r sh
 	for _, ch := range r.DirectChildren {
 		shieldReportWriteTXTUnit(b, ch.Name, ch.Failed, ch.Report, depth+1)
 	}
+}
+
+func shieldReportDocumentSerializeJSON(doc ShieldReportDocument) ([]byte, error) {
+	return json.MarshalIndent(doc, "", "  ")
+}
+
+func ShieldReportDocumentRead(path string) (ShieldReportDocument, error) {
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		return ShieldReportDocument{}, err
+	}
+
+	var doc ShieldReportDocument
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return ShieldReportDocument{}, err
+	}
+
+	return doc, nil
 }
