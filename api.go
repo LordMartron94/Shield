@@ -20,28 +20,20 @@ panics are recovered, logged, and treated as failure for that case.
 type Runner[TInput, TOutput any] = internal.ShieldAtomRunner[TInput, TOutput]
 
 /*
-Validator compares actual output to the case’s expected value (and any other invariants).
-It returns an AtomResult by value. Helpers return pointers; dereference when returning, e.g.
-return *AtomResultFailureCreate("reason").
-*/
-type Validator[TInput, TOutput any] = internal.ShieldValidator[TInput, TOutput]
-
-/*
 CaseEvaluation is a case-level validation function variant. Cases created through
-CaseCreateWithEvaluation use this function instead of the atom validator.
+CaseCreate use this function after the case runner output is produced.
 */
-type CaseEvaluation[TInput, TOutput any] = internal.ShieldValidator[TInput, TOutput]
+type CaseEvaluation[TOutput any] = internal.ShieldCaseEvaluator[TOutput]
 
 /*
-Atom is one ordered check within a unit: a runner, a validator, and registered cases.
+Atom is one ordered check within a unit: a runner and registered cases.
 */
 type Atom[TInput, TOutput any] = internal.ShieldAtom[TInput, TOutput]
 
 /*
 Case binds a name and input for one invocation of an atom’s runner, and may optionally
-carry an expected output or a case-level evaluation function.
-Read fields in validators via CaseNameGet, CaseInputGet, CaseExpectedGet/CaseExpectedTryGet,
-CaseEvaluationTryGet, and CaseDescriptionGet.
+carry a case-level evaluation function.
+Read fields in evaluators via CaseNameGet, CaseInputGet, CaseEvaluationTryGet, and CaseDescriptionGet.
 */
 type Case[TInput, TOutput any] = internal.ShieldCase[TInput, TOutput]
 
@@ -421,7 +413,7 @@ func UnitEvaluationDefaultFailed(report UnitRunReport) bool {
 
 /*
 UnitRegisterAtom attaches a typed atom to the unit. The atom is type-erased for storage;
-runner and validator must agree with the case types registered on that atom.
+runner and case types must agree for all cases registered on that atom.
 */
 func UnitRegisterAtom[TInput, TOutput any](unit *Unit, atom *Atom[TInput, TOutput]) {
 	internal.ShieldUnitRegisterAtom(unit, *atom)
@@ -436,15 +428,14 @@ func UnitRegisterSubUnits(unit *Unit, subUnits ...Unit) {
 }
 
 /*
-AtomCreate constructs an atom with explicit order, name, runner, and validator.
-Cases are added with AtomRegisterCase.
+AtomCreate constructs an atom with explicit order, name, and runner.
+Cases are added with AtomRegisterCase and must provide an evaluator.
 */
 func AtomCreate[TInput, TOutput any](
 	order int, name string,
 	runner Runner[TInput, TOutput],
-	validator Validator[TInput, TOutput],
 ) *Atom[TInput, TOutput] {
-	return internal.ShieldAtomCreate(order, name, runner, validator)
+	return internal.ShieldAtomCreate(order, name, runner)
 }
 
 /*
@@ -463,36 +454,21 @@ func AtomSetDescription[TInput, TOutput any](atom *Atom[TInput, TOutput], descri
 
 /*
 AtomRegisterCase appends a case; cases run in registration order. testCase must not be nil.
+Cases without evaluator are treated as failures at runtime.
 */
 func AtomRegisterCase[TInput, TOutput any](atom *Atom[TInput, TOutput], testCase *Case[TInput, TOutput]) {
 	internal.ShieldAtomRegisterCase(atom, testCase)
 }
 
 /*
-CaseCreate builds a named case from input and expected output.
+CaseCreate builds a named case from input and a case-level evaluation function.
 */
-func CaseCreate[TInput, TOutput any](name string, input TInput, expected TOutput) *Case[TInput, TOutput] {
-	return internal.ShieldCaseCreate(name, input, expected)
-}
-
-/*
-CaseCreateWithoutExpected builds a named case from input only.
-Use this for atoms whose validator checks side effects/invariants without needing an expected output value.
-*/
-func CaseCreateWithoutExpected[TInput, TOutput any](name string, input TInput) *Case[TInput, TOutput] {
-	return internal.ShieldCaseCreateWithoutExpected[TInput, TOutput](name, input)
-}
-
-/*
-CaseCreateWithEvaluation builds a named case from input and a case-level evaluation function.
-When provided, this evaluation function runs instead of the atom validator for this case.
-*/
-func CaseCreateWithEvaluation[TInput, TOutput any](
+func CaseCreate[TInput, TOutput any](
 	name string,
 	input TInput,
-	evaluation CaseEvaluation[TInput, TOutput],
+	evaluation CaseEvaluation[TOutput],
 ) *Case[TInput, TOutput] {
-	return internal.ShieldCaseCreateWithEvaluation(name, input, evaluation)
+	return internal.ShieldCaseCreate(name, input, evaluation)
 }
 
 /*
@@ -517,25 +493,10 @@ func CaseInputGet[TInput, TOutput any](c Case[TInput, TOutput]) TInput {
 }
 
 /*
-CaseExpectedGet returns the expected output clients associate with this case (validator contract).
-*/
-func CaseExpectedGet[TInput, TOutput any](c Case[TInput, TOutput]) TOutput {
-	return internal.ShieldCaseExpectedGet(c)
-}
-
-/*
-CaseExpectedTryGet returns the expected output and whether it was explicitly provided.
-Cases created through CaseCreateWithoutExpected return (zeroValue, false).
-*/
-func CaseExpectedTryGet[TInput, TOutput any](c Case[TInput, TOutput]) (TOutput, bool) {
-	return internal.ShieldCaseExpectedTryGet(c)
-}
-
-/*
 CaseEvaluationTryGet returns the case-level evaluation function and whether it was explicitly provided.
-Cases created through CaseCreateWithEvaluation return (fn, true).
+Cases created through CaseCreate return (fn, true).
 */
-func CaseEvaluationTryGet[TInput, TOutput any](c Case[TInput, TOutput]) (CaseEvaluation[TInput, TOutput], bool) {
+func CaseEvaluationTryGet[TInput, TOutput any](c Case[TInput, TOutput]) (CaseEvaluation[TOutput], bool) {
 	return internal.ShieldCaseEvaluationTryGet(c)
 }
 

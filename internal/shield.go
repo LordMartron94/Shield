@@ -46,7 +46,7 @@ func ShieldAtomResultSetSkipFurtherAtomsInUnit(result *ShieldAtomResult, value b
 
 type ShieldAtomRunner[TInput, TOutput any] func(in TInput) TOutput
 
-type ShieldValidator[TInput, TOutput any] func(output TOutput, testCase ShieldCase[TInput, TOutput]) ShieldAtomResult
+type ShieldCaseEvaluator[TOutput any] func(output TOutput) ShieldAtomResult
 
 // ------------------------------------------------------------- CONFIGURATION
 
@@ -233,8 +233,7 @@ type ShieldAtom[TInput, TOutput any] struct {
 	name        string
 	description *string
 
-	runner    ShieldAtomRunner[TInput, TOutput]
-	validator ShieldValidator[TInput, TOutput]
+	runner ShieldAtomRunner[TInput, TOutput]
 
 	cases []ShieldCase[TInput, TOutput]
 
@@ -245,14 +244,12 @@ type ShieldAtom[TInput, TOutput any] struct {
 func ShieldAtomCreate[TInput, TOutput any](
 	order int, name string,
 	runner ShieldAtomRunner[TInput, TOutput],
-	validator ShieldValidator[TInput, TOutput],
 ) *ShieldAtom[TInput, TOutput] {
 	return &ShieldAtom[TInput, TOutput]{
 		order:       order,
 		name:        name,
 		description: nil,
 		runner:      runner,
-		validator:   validator,
 		setup:       nil,
 		teardown:    nil,
 	}
@@ -285,9 +282,6 @@ func (a *ShieldAtom[TInput, TOutput]) toAny() ShieldAtom[any, any] {
 		runner: func(in any) any {
 			return a.runner(in.(TInput))
 		},
-		validator: func(output any, testCase ShieldCase[any, any]) ShieldAtomResult {
-			return a.validator(output.(TOutput), shieldCaseToTyped[TInput, TOutput](testCase))
-		},
 		setup:    a.setup,
 		teardown: a.teardown,
 		cases:    newCases,
@@ -301,41 +295,19 @@ type ShieldCase[TInput, TOutput any] struct {
 	description *string
 
 	input         TInput
-	expected      TOutput
-	hasExpected   bool
-	evaluation    ShieldValidator[TInput, TOutput]
+	evaluation    ShieldCaseEvaluator[TOutput]
 	hasEvaluation bool
 }
 
-func ShieldCaseCreate[TInput, TOutput any](name string, input TInput, expected TOutput) *ShieldCase[TInput, TOutput] {
-	return &ShieldCase[TInput, TOutput]{
-		name:        name,
-		description: nil,
-		input:       input,
-		expected:    expected,
-		hasExpected: true,
-	}
-}
-
-func ShieldCaseCreateWithoutExpected[TInput, TOutput any](name string, input TInput) *ShieldCase[TInput, TOutput] {
-	return &ShieldCase[TInput, TOutput]{
-		name:        name,
-		description: nil,
-		input:       input,
-		hasExpected: false,
-	}
-}
-
-func ShieldCaseCreateWithEvaluation[TInput, TOutput any](
+func ShieldCaseCreate[TInput, TOutput any](
 	name string,
 	input TInput,
-	evaluation ShieldValidator[TInput, TOutput],
+	evaluation ShieldCaseEvaluator[TOutput],
 ) *ShieldCase[TInput, TOutput] {
 	return &ShieldCase[TInput, TOutput]{
 		name:          name,
 		description:   nil,
 		input:         input,
-		hasExpected:   false,
 		evaluation:    evaluation,
 		hasEvaluation: true,
 	}
@@ -353,15 +325,7 @@ func ShieldCaseInputGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) TInp
 	return c.input
 }
 
-func ShieldCaseExpectedGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) TOutput {
-	return c.expected
-}
-
-func ShieldCaseExpectedTryGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) (TOutput, bool) {
-	return c.expected, c.hasExpected
-}
-
-func ShieldCaseEvaluationTryGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) (ShieldValidator[TInput, TOutput], bool) {
+func ShieldCaseEvaluationTryGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) (ShieldCaseEvaluator[TOutput], bool) {
 	return c.evaluation, c.hasEvaluation
 }
 
@@ -370,10 +334,10 @@ func ShieldCaseDescriptionGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]
 }
 
 func (s *ShieldCase[TInput, TOutput]) toAny() ShieldCase[any, any] {
-	var evaluation ShieldValidator[any, any]
+	var evaluation ShieldCaseEvaluator[any]
 	if s.hasEvaluation && s.evaluation != nil {
-		evaluation = func(output any, testCase ShieldCase[any, any]) ShieldAtomResult {
-			return s.evaluation(output.(TOutput), shieldCaseToTyped[TInput, TOutput](testCase))
+		evaluation = func(output any) ShieldAtomResult {
+			return s.evaluation(output.(TOutput))
 		}
 	}
 
@@ -381,19 +345,16 @@ func (s *ShieldCase[TInput, TOutput]) toAny() ShieldCase[any, any] {
 		name:          s.name,
 		description:   s.description,
 		input:         s.input,
-		expected:      s.expected,
-		hasExpected:   s.hasExpected,
 		evaluation:    evaluation,
 		hasEvaluation: s.hasEvaluation,
 	}
 }
 
 func shieldCaseToTyped[TInput, TOutput any](shieldCase ShieldCase[any, any]) ShieldCase[TInput, TOutput] {
-	var evaluation ShieldValidator[TInput, TOutput]
+	var evaluation ShieldCaseEvaluator[TOutput]
 	if shieldCase.hasEvaluation && shieldCase.evaluation != nil {
-		evaluation = func(output TOutput, testCase ShieldCase[TInput, TOutput]) ShieldAtomResult {
-			testCaseAny := testCase.toAny()
-			return shieldCase.evaluation(output, testCaseAny)
+		evaluation = func(output TOutput) ShieldAtomResult {
+			return shieldCase.evaluation(output)
 		}
 	}
 
@@ -401,8 +362,6 @@ func shieldCaseToTyped[TInput, TOutput any](shieldCase ShieldCase[any, any]) Shi
 		name:          shieldCase.name,
 		description:   shieldCase.description,
 		input:         shieldCase.input.(TInput),
-		expected:      shieldCase.expected.(TOutput),
-		hasExpected:   shieldCase.hasExpected,
 		evaluation:    evaluation,
 		hasEvaluation: shieldCase.hasEvaluation,
 	}
@@ -770,9 +729,11 @@ func atomEvaluateCase(
 	output := atom.runner(shieldCase.input)
 	var validated ShieldAtomResult
 	if shieldCase.hasEvaluation && shieldCase.evaluation != nil {
-		validated = shieldCase.evaluation(output, shieldCase)
+		validated = shieldCase.evaluation(output)
 	} else {
-		validated = atom.validator(output, shieldCase)
+		validated = *ShieldAtomResultFailureCreate(
+			fmt.Sprintf("case '%s' has no evaluator", shieldCase.name),
+		)
 	}
 	outcome.validationResult = &validated
 

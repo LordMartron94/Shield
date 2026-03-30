@@ -2,8 +2,8 @@
 Package shield is a structured validation and regression harness.
 
 It organizes work into units (coarse groupings, often mirroring a subsystem) and atoms
-(ordered checks inside a unit). Each atom pairs a runner function with a validator and
-one or more cases. Execution order is deterministic: top-level units, direct sub-units,
+(ordered checks inside a unit). Each atom has a runner function and one or more cases,
+where each case owns its evaluator. Execution order is deterministic: top-level units, direct sub-units,
 and atoms each use an explicit integer order field (lower first); cases run in registration
 order. Within a unit, sub-units run entirely before that unit’s own atoms.
 
@@ -17,7 +17,7 @@ and docs/adr/0001-Runtime-Configuration-Filtering.md). There is no implicit disc
 build a Configuration, register units, then Run.
 
 Logging is emitted through the echo subsystem registered by this module (prefix "Shield").
-Failures in runner or validator paths are recovered, logged, and do not crash the process.
+Failures in runner or case evaluator paths are recovered, logged, and do not crash the process.
 
 The module also ships an optional interactive CLI at ./cmd/shield. The CLI intentionally
 does not discover domain tests implicitly; instead clients register a builder callback through
@@ -35,8 +35,8 @@ Typical flow:
 
  1. ConfigurationCreate, ConfigurationRegisterUnits with units built via UnitCreate and
     UnitRegisterAtom / UnitRegisterSubUnits.
- 2. For each atom: AtomCreate(runner, validator), AtomRegisterCase for each case (via
-    CaseCreate or CaseCreateWithoutExpected), optional AtomSetSetupAndTeardown /
+ 2. For each atom: AtomCreate(runner), AtomRegisterCase for each case (via
+    CaseCreate), optional AtomSetSetupAndTeardown /
     AtomSetDescription.
  3. Optional: UnitSetStopRemainingSubUnitsOnChildFailure / UnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits /
     UnitSetEvaluationGate on units that model dependencies.
@@ -53,7 +53,7 @@ Typical flow:
     then run `go run ./cmd/shield -config=shieldconfig.toml` and execute `run`, `list`, `show`, `delete`, `clean`,
     `baseline`, `help`.
 
-Validators return AtomResult by value. Use *AtomResultSuccessCreate(), *AtomResultFailureCreate(reason),
+Case evaluators return AtomResult by value. Use *AtomResultSuccessCreate(), *AtomResultFailureCreate(reason),
 and the AtomResultSet* helpers when you need notes or to skip remaining atoms in the current unit.
 
 Complexity: Run is O(total cases) with modest constant overhead per case for logging; sorting

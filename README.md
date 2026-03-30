@@ -1,10 +1,10 @@
 # shield
 
-Shield is a structured harness for regression checks, invariants, and unfinished-feature guards. You describe **units** (coarse groupings), **atoms** (ordered checks inside a unit), and **cases** (inputs and expected outputs). The library runs them in deterministic order and reports through **echo** (log prefix `Shield`).
+Shield is a structured harness for regression checks, invariants, and unfinished-feature guards. You describe **units** (coarse groupings), **atoms** (ordered checks inside a unit), and **cases** (inputs and case-owned evaluators). The library runs them in deterministic order and reports through **echo** (log prefix `Shield`).
 
 ## What it is not
 
-Shield is not a substitute for Go’s `testing` package or a full test runner with assertions libraries. It is an explicit graph of named checks with runner/validator functions, optional setup/teardown, and runtime name-based filtering.
+Shield is not a substitute for Go’s `testing` package or a full test runner with assertions libraries. It is an explicit graph of named checks with runner functions and case evaluators, optional setup/teardown, and runtime name-based filtering.
 
 ## Core concepts
 
@@ -12,8 +12,8 @@ Shield is not a substitute for Go’s `testing` package or a full test runner wi
 | -------- | ------ |
 | **Configuration** | Top-level list of units you pass to `EngineCreate`. |
 | **Unit** | Named group with an `order` field (lower runs first among siblings). Can contain **sub-units** (run first, also ordered) then **atoms**. |
-| **Atom** | One check: a `Runner`, a `Validator`, and registered **cases**. Also ordered by `order`. |
-| **Case** | Named input for one run of the atom’s runner, with optional expected output. |
+| **Atom** | One check: a `Runner` and registered **cases**. Also ordered by `order`. |
+| **Case** | Named input for one run of the atom’s runner, with a case evaluator. |
 | **Engine** | Runnable snapshot built from a `Configuration`. |
 | **RunReport** | Returned by `Run`: `Failed`, `Elapsed`, `TopLevel` with nested unit outcomes. |
 | **RunOutcome** | Returned by `RunWithReportPersistence`: wraps `Report` (`RunReport`) and optional `WrittenReportPath` when persistence wrote a file. |
@@ -24,7 +24,7 @@ Shield is not a substitute for Go’s `testing` package or a full test runner wi
 | **UnitRunReport** | Filled after a unit runs: skips, atom stats, child outcomes. Fed to `UnitEvaluationGate`. |
 | **UnitEvaluationGate** | `func(UnitRunReport) bool` — return `true` if the unit counts as **failed** (for parents and stop-on-child). |
 
-Validators return an `AtomResult` **by value**. Helpers return pointers; dereference when returning, for example `return *shield.AtomResultFailureCreate("reason")`. Use `AtomResultSetSkipFurtherAtomsInUnit` to stop running later atoms in the **current** unit after the current atom completes.
+Case evaluators return an `AtomResult` **by value**. Helpers return pointers; dereference when returning, for example `return *shield.AtomResultFailureCreate("reason")`. Use `AtomResultSetSkipFurtherAtomsInUnit` to stop running later atoms in the **current** unit after the current atom completes.
 
 ## Shield CLI (interactive)
 
@@ -138,14 +138,14 @@ func main() {
     cfg := shield.ConfigurationCreate()
 
     unit := shield.UnitCreate(0, "example")
-    atom := shield.AtomCreate(0, "equals_self", func(in int) int { return in },
-        func(out int, c shield.Case[int, int]) shield.AtomResult {
-            if out == shield.CaseExpectedGet(c) {
-                return *shield.AtomResultSuccessCreate()
-            }
-            return *shield.AtomResultFailureCreate("output != expected")
-        })
-    shield.AtomRegisterCase(atom, shield.CaseCreate("identity", 42, 42))
+    atom := shield.AtomCreate(0, "equals_self", func(in int) int { return in })
+    expected := 42
+    shield.AtomRegisterCase(atom, shield.CaseCreate("identity", 42, func(out int) shield.AtomResult {
+        if out == expected {
+            return *shield.AtomResultSuccessCreate()
+        }
+        return *shield.AtomResultFailureCreate("output != expected")
+    }))
     shield.UnitRegisterAtom(unit, atom)
     shield.ConfigurationRegisterUnits(cfg, *unit)
 
@@ -161,7 +161,7 @@ Adjust imports if your `go.mod` uses a module path other than `shield` (for exam
 ## Behaviour notes
 
 - **Ordering**: Top-level units, sub-units under a parent, and atoms within a unit are sorted by `order` before execution. Cases run in registration order.
-- **Panics**: Runner, validator, setup, and teardown panics are recovered and logged; they do not crash the process.
+- **Panics**: Runner, case evaluator, setup, and teardown panics are recovered and logged; they do not crash the process.
 - **Sub-units**: Register with `UnitRegisterSubUnits`. A sub-unit cannot use the same `name` as its parent (registration panics). Nesting is recursive; each unit’s gate sees its own `DirectChildren` with full nested `Report` values.
 - **Dependencies between sibling sub-units**: Call `UnitSetStopRemainingSubUnitsOnChildFailure(parent, true)` so a failed sub-unit skips later siblings. If the parent’s own atoms also depend on those sub-units, add `UnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits(parent, true)`. Default failure classification is `UnitEvaluationDefaultFailed` (override with `UnitSetEvaluationGate`). Blacklist skips are not treated as failure.
 - **Output**: `Run` returns `RunReport` with `Failed` and per–top-level-unit outcomes (`TopLevel` with nested `Report`). Echo also emits a final **Shield run summary** (structured fields: counts, `run_failed`, timing aggregates; atom-duration stats via statarch when atoms ran: mean, population stddev, min/max from the five-number path, sum, median, Q1/Q3, IQR, p95/p99, and population coefficient of variation only when `atoms_timed >= 2` and `|mean|` is above a tiny ns epsilon so statarch never divides by zero). Use `report.Failed` (or walk `TopLevel`) for exit codes and CI. With very few timed atoms, quartiles and tail percentiles are still defined (interpolation) but are noisier; interpret accordingly.
