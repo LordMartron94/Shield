@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"shield"
 	"sort"
@@ -18,7 +19,21 @@ func shieldCliRegisterCommands() {
 }
 
 func shieldCliRegisterRunCommands() {
-	shieldCliRegisterCommand([]string{"run"}, "Run Shield using the registered harness (flags: --unit, --atom, --mode, --out, --persist)", func(args []string, state *shieldCliState) {
+	shieldCliRegisterCommand([]string{"run"}, "Run Shield using optional target from TOML (usage: run [target] [flags])", func(args []string, state *shieldCliState) {
+		target := ""
+		if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+			target = args[0]
+			args = args[1:]
+		}
+
+		targetCfg, err := shieldCliRunTargetResolve(state.config, target)
+		if err != nil {
+			fmt.Println(shieldCliColorBold("run error: "+err.Error(), ansiRed))
+			return
+		}
+
+		runCfg := targetCfg.Run
+
 		fs := flag.NewFlagSet("run", flag.ContinueOnError)
 		fs.SetOutput(os.Stdout)
 
@@ -30,11 +45,41 @@ func shieldCliRegisterRunCommands() {
 
 		fs.StringVar(&unitBlacklistRaw, "unit", "", "comma-separated unit blacklist")
 		fs.StringVar(&atomBlacklistRaw, "atom", "", "comma-separated atom blacklist")
-		fs.StringVar(&modeRaw, "mode", state.config.Run.Mode, "persistence mode: json|txt|both")
-		fs.StringVar(&outDirRaw, "out", state.resultsDir, "report output directory")
-		fs.BoolVar(&persistEnabled, "persist", state.config.Run.Persist, "persist run report files")
+		defaultOutDir := state.resultsDir
+		if strings.TrimSpace(runCfg.OutDir) != "" {
+			defaultOutDir = runCfg.OutDir
+		}
+
+		fs.StringVar(&modeRaw, "mode", runCfg.Mode, "persistence mode: json|txt|both")
+		fs.StringVar(&outDirRaw, "out", defaultOutDir, "report output directory")
+		fs.BoolVar(&persistEnabled, "persist", runCfg.Persist, "persist run report files")
 
 		if err := fs.Parse(args); err != nil {
+			return
+		}
+
+		switch targetCfg.EntrypointKind {
+		case "", "harness":
+			// default in-process harness execution
+		case "go_test":
+			if strings.TrimSpace(targetCfg.Entrypoint) == "" {
+				fmt.Println(shieldCliColorBold("run error: go_test target requires 'entrypoint' in TOML", ansiRed))
+				return
+			}
+
+			if target != "" {
+				fmt.Println(shieldCliColor("target:", ansiCyan), target)
+			}
+
+			if err := shieldCliRunTargetGoTestExecute(targetCfg, state.configDir); err != nil {
+				fmt.Println(shieldCliColorBold("run result: failed ("+err.Error()+")", ansiRed))
+				return
+			}
+
+			fmt.Println(shieldCliColorBold("run result: success", ansiGreen))
+			return
+		default:
+			fmt.Println(shieldCliColorBold("run error: unsupported entrypoint_kind '"+targetCfg.EntrypointKind+"'", ansiRed))
 			return
 		}
 
@@ -44,8 +89,8 @@ func shieldCliRegisterRunCommands() {
 			return
 		}
 
-		unitBlacklist := shieldCliStringListMerge(state.config.Run.UnitBlacklist, shieldCliSplitCSV(unitBlacklistRaw))
-		atomBlacklist := shieldCliStringListMerge(state.config.Run.AtomBlacklist, shieldCliSplitCSV(atomBlacklistRaw))
+		unitBlacklist := shieldCliStringListMerge(runCfg.UnitBlacklist, shieldCliSplitCSV(unitBlacklistRaw))
+		atomBlacklist := shieldCliStringListMerge(runCfg.AtomBlacklist, shieldCliSplitCSV(atomBlacklistRaw))
 
 		engine := shield.EngineCreate(*cfg)
 		runtimeCfg := shield.RuntimeConfigurationCreate(unitBlacklist, atomBlacklist)
@@ -57,6 +102,10 @@ func shieldCliRegisterRunCommands() {
 		report := shield.RunWithReportPersistence(engine, runtimeCfg, persist)
 		state.lastResult = report.WrittenReportPath
 		state.resultsDir = outDirRaw
+
+		if target != "" {
+			fmt.Println(shieldCliColor("target:", ansiCyan), target)
+		}
 
 		if report.WrittenReportPath != "" {
 			fmt.Println(shieldCliColor("report:", ansiCyan), report.WrittenReportPath)
@@ -222,6 +271,41 @@ func shieldCliRegisterResultCommands() {
 	})
 }
 
+func shieldCliRunTargetGoTestExecute(targetCfg shieldCliResolvedRunTarget, workingDir string) error {
+	goArgs := []string{"test", targetCfg.Entrypoint}
+
+	if strings.TrimSpace(targetCfg.TestRunPattern) != "" {
+		goArgs = append(goArgs, "-run", targetCfg.TestRunPattern)
+	}
+
+	goArgs = append(goArgs, targetCfg.EntrypointArgs...)
+
+	cmd := exec.Command("go", goArgs...)
+	cmd.Dir = workingDir
+	env := os.Environ()
+
+	defaultOutDir := shieldCliDefaultResultsDir
+	if strings.TrimSpace(targetCfg.Run.OutDir) != "" {
+		defaultOutDir = targetCfg.Run.OutDir
+	}
+
+	resolvedOutDir := defaultOutDir
+	if !filepath.IsAbs(resolvedOutDir) {
+		resolvedOutDir = filepath.Join(workingDir, resolvedOutDir)
+	}
+
+	resolvedLogDir := filepath.Join(workingDir, "logs")
+
+	env = append(env, "SHIELD_RESULTS_DIR="+resolvedOutDir)
+	env = append(env, "RULEFORGE_LOG_DIR="+resolvedLogDir)
+	cmd.Env = env
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	return cmd.Run()
+}
+
 func shieldCliRegisterUtilityCommands() {
 	shieldCliRegisterCommand([]string{"help"}, "Show command help", func(_ []string, _ *shieldCliState) {
 		entries := make([]commandHelpEntry, len(commandHelp))
@@ -241,8 +325,15 @@ func shieldCliRegisterUtilityCommands() {
 		fmt.Println("results_dir:", state.resultsDir)
 		fmt.Println("run.mode:", state.config.Run.Mode)
 		fmt.Println("run.persist:", state.config.Run.Persist)
+		fmt.Println("run.out_dir:", state.config.Run.OutDir)
 		fmt.Println("run.unit_blacklist:", strings.Join(state.config.Run.UnitBlacklist, ","))
 		fmt.Println("run.atom_blacklist:", strings.Join(state.config.Run.AtomBlacklist, ","))
+		targets := shieldCliConfigTargetNames(state.config)
+		if len(targets) == 0 {
+			fmt.Println("targets:", "(none)")
+		} else {
+			fmt.Println("targets:", strings.Join(targets, ","))
+		}
 	})
 
 	shieldCliRegisterCommand([]string{"quit", "exit"}, "Exit the shell", func(_ []string, _ *shieldCliState) {

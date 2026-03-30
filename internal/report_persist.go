@@ -1,8 +1,8 @@
 package internal
 
 import (
-	"encoding/json"
 	"echo"
+	"encoding/json"
 	"fmt"
 	"foundation/formatting"
 	"math"
@@ -38,6 +38,11 @@ type ShieldReportPersistence struct {
 }
 
 func ShieldReportPersistenceCreate(outputDir string) *ShieldReportPersistence {
+	envOutputDir := strings.TrimSpace(os.Getenv("SHIELD_RESULTS_DIR"))
+	if envOutputDir != "" {
+		outputDir = envOutputDir
+	}
+
 	return &ShieldReportPersistence{
 		outputDir: outputDir,
 		enabled:   false,
@@ -76,55 +81,55 @@ func ShieldReportPersistenceSetAdapter(p *ShieldReportPersistence, adapter Shiel
 }
 
 type shieldReportDurationSummary struct {
-	AtomsTimed      int     `json:"atoms_timed"`
-	MeanNs          float64 `json:"mean_ns"`
-	StddevPopNs     float64 `json:"stddev_pop_ns"`
-	MinNs           float64 `json:"min_ns"`
-	MaxNs           float64 `json:"max_ns"`
-	SumNs           float64 `json:"sum_ns"`
-	MedianNs        float64 `json:"median_ns"`
-	Q1Ns            float64 `json:"q1_ns"`
-	Q3Ns            float64 `json:"q3_ns"`
-	IQRNs           float64 `json:"iqr_ns"`
-	P95Ns           float64 `json:"p95_ns"`
-	P99Ns           float64 `json:"p99_ns"`
-	CoeffVarPop     float64 `json:"coeff_var_pop,omitempty"`
-	MeanHuman       string  `json:"mean_human"`
-	MinHuman        string  `json:"min_human"`
-	MaxHuman        string  `json:"max_human"`
-	MedianHuman     string  `json:"median_human"`
-	P95Human        string  `json:"p95_human"`
-	P99Human        string  `json:"p99_human"`
-	StatsError      string  `json:"stats_error,omitempty"`
+	AtomsTimed  int     `json:"atoms_timed"`
+	MeanNs      float64 `json:"mean_ns"`
+	StddevPopNs float64 `json:"stddev_pop_ns"`
+	MinNs       float64 `json:"min_ns"`
+	MaxNs       float64 `json:"max_ns"`
+	SumNs       float64 `json:"sum_ns"`
+	MedianNs    float64 `json:"median_ns"`
+	Q1Ns        float64 `json:"q1_ns"`
+	Q3Ns        float64 `json:"q3_ns"`
+	IQRNs       float64 `json:"iqr_ns"`
+	P95Ns       float64 `json:"p95_ns"`
+	P99Ns       float64 `json:"p99_ns"`
+	CoeffVarPop float64 `json:"coeff_var_pop,omitempty"`
+	MeanHuman   string  `json:"mean_human"`
+	MinHuman    string  `json:"min_human"`
+	MaxHuman    string  `json:"max_human"`
+	MedianHuman string  `json:"median_human"`
+	P95Human    string  `json:"p95_human"`
+	P99Human    string  `json:"p99_human"`
+	StatsError  string  `json:"stats_error,omitempty"`
 }
 
 type shieldReportSummaryJSON struct {
-	UnitsVisited            int                          `json:"units_visited"`
-	UnitsSkippedBlacklist   int                          `json:"units_skipped_blacklist"`
-	UnitsSkippedSetup       int                          `json:"units_skipped_setup"`
-	AtomValidationFailures  int                          `json:"atom_validation_failures"`
-	AtomPanics              int                          `json:"atom_panics"`
-	AtomSetupFailures       int                          `json:"atom_setup_failures"`
-	SubUnitLoopEarlyStops   int                          `json:"subunit_loop_early_stops"`
-	UnitsFailedGate         int                          `json:"units_failed_gate"`
-	Duration                *shieldReportDurationSummary `json:"duration,omitempty"`
+	UnitsVisited           int                          `json:"units_visited"`
+	UnitsSkippedBlacklist  int                          `json:"units_skipped_blacklist"`
+	UnitsSkippedSetup      int                          `json:"units_skipped_setup"`
+	AtomValidationFailures int                          `json:"atom_validation_failures"`
+	AtomPanics             int                          `json:"atom_panics"`
+	AtomSetupFailures      int                          `json:"atom_setup_failures"`
+	SubUnitLoopEarlyStops  int                          `json:"subunit_loop_early_stops"`
+	UnitsFailedGate        int                          `json:"units_failed_gate"`
+	Duration               *shieldReportDurationSummary `json:"duration,omitempty"`
 }
 
 type shieldReportUnitReportJSON struct {
-	Name                       string                       `json:"name"`
-	SkippedDueToBlacklist      bool                         `json:"skipped_due_to_blacklist"`
-	SkippedDueToSetup        bool                         `json:"skipped_due_to_setup"`
-	AtomSetupFailureCount      int                          `json:"atom_setup_failure_count"`
-	AtomValidationFailures     int                          `json:"atom_validation_failures"`
-	AtomPanics                 int                          `json:"atom_panics"`
-	TerminatedSubUnitLoopEarly bool                         `json:"terminated_subunit_loop_early"`
-	DirectChildren             []shieldReportChildNodeJSON  `json:"direct_children"`
+	Name                       string                      `json:"name"`
+	SkippedDueToBlacklist      bool                        `json:"skipped_due_to_blacklist"`
+	SkippedDueToSetup          bool                        `json:"skipped_due_to_setup"`
+	AtomSetupFailureCount      int                         `json:"atom_setup_failure_count"`
+	AtomValidationFailures     int                         `json:"atom_validation_failures"`
+	AtomPanics                 int                         `json:"atom_panics"`
+	TerminatedSubUnitLoopEarly bool                        `json:"terminated_subunit_loop_early"`
+	DirectChildren             []shieldReportChildNodeJSON `json:"direct_children"`
 }
 
 type shieldReportChildNodeJSON struct {
-	Name   string                       `json:"name"`
-	Failed bool                         `json:"failed"`
-	Report shieldReportUnitReportJSON   `json:"report"`
+	Name   string                     `json:"name"`
+	Failed bool                       `json:"failed"`
+	Report shieldReportUnitReportJSON `json:"report"`
 }
 
 type shieldReportTopNodeJSON struct {
@@ -147,7 +152,7 @@ func shieldReportUnitReportToJSON(r ShieldUnitRunReport) shieldReportUnitReportJ
 	out := shieldReportUnitReportJSON{
 		Name:                       r.Name,
 		SkippedDueToBlacklist:      r.SkippedDueToBlacklist,
-		SkippedDueToSetup:        r.SkippedDueToSetup,
+		SkippedDueToSetup:          r.SkippedDueToSetup,
 		AtomSetupFailureCount:      r.AtomSetupFailureCount,
 		AtomValidationFailures:     r.AtomValidationFailures,
 		AtomPanics:                 r.AtomPanics,
@@ -174,14 +179,14 @@ func shieldReportBuildDocument(report ShieldRunReport, metrics ShieldRunMetrics)
 		ElapsedNs:     report.Elapsed.Nanoseconds(),
 		ElapsedHuman:  formatting.FormatDurationNSF64(float64(report.Elapsed.Nanoseconds())),
 		Summary: shieldReportSummaryJSON{
-			UnitsVisited:            metrics.Aggregates.UnitsVisited,
-			UnitsSkippedBlacklist:   metrics.Aggregates.UnitsSkippedBlacklist,
-			UnitsSkippedSetup:       metrics.Aggregates.UnitsSkippedSetup,
-			AtomValidationFailures:  metrics.Aggregates.AtomValidationFailures,
-			AtomPanics:              metrics.Aggregates.AtomPanics,
-			AtomSetupFailures:       metrics.Aggregates.AtomSetupFailures,
-			SubUnitLoopEarlyStops:   metrics.Aggregates.SubUnitLoopEarlyStops,
-			UnitsFailedGate:         metrics.Aggregates.UnitsFailedGate,
+			UnitsVisited:           metrics.Aggregates.UnitsVisited,
+			UnitsSkippedBlacklist:  metrics.Aggregates.UnitsSkippedBlacklist,
+			UnitsSkippedSetup:      metrics.Aggregates.UnitsSkippedSetup,
+			AtomValidationFailures: metrics.Aggregates.AtomValidationFailures,
+			AtomPanics:             metrics.Aggregates.AtomPanics,
+			AtomSetupFailures:      metrics.Aggregates.AtomSetupFailures,
+			SubUnitLoopEarlyStops:  metrics.Aggregates.SubUnitLoopEarlyStops,
+			UnitsFailedGate:        metrics.Aggregates.UnitsFailedGate,
 		},
 		Tree: make([]shieldReportTopNodeJSON, 0, len(report.TopLevel)),
 	}

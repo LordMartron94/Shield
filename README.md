@@ -46,7 +46,7 @@ shield.CLIHarnessBuilderRegister(func() (*shield.Configuration, error) {
 
 Then in the CLI:
 
-- `run` executes the registered harness
+- `run [target] [flags]` executes the registered harness (target from TOML)
 - `list` / `ls` lists persisted run artifacts
 - `show <latest|index|file>` prints report metadata
 - `delete <latest|index|file>` deletes a report (with confirmation)
@@ -81,12 +81,40 @@ Supported keys:
 - `[run].atom_blacklist` default atom blacklist for `run`
 - `[run].persist` default persistence toggle for `run`
 - `[run].mode` default persistence mode (`json|txt|both`) for `run`
+- `[run].out_dir` default output directory for `run` when set
+- `[targets.<name>]` named run target overrides for `run <name>`
+  - optional `entrypoint_kind = "go_test"` to delegate execution to `go test`
+  - `entrypoint` package/path for delegated execution
+  - `test_run_pattern` optional `-run` regex for Go tests
+  - `entrypoint_args` optional extra arguments appended to `go test`
 
 Precedence for `run`:
 
 1. Explicit CLI flags (`--unit`, `--atom`, `--persist`, `--mode`, `--out`)
-2. TOML defaults
-3. Built-in defaults
+2. Selected target overrides (`run <target>`)
+3. TOML defaults
+4. Built-in defaults
+
+### In-Go entrypoint targets
+
+For Anvil-like target resolution of Go entrypoints, define a target as:
+
+```toml
+[targets.tests]
+entrypoint_kind = "go_test"
+entrypoint = "./tests"
+test_run_pattern = "^TestShieldFrameworkSample$"
+entrypoint_args = ["-count=1", "-v"]
+```
+
+Then invoke:
+
+```text
+run tests
+```
+
+When `entrypoint_kind = "go_test"` is set, Shield CLI delegates run execution to `go test`
+for that target entrypoint instead of using the in-process `CLIHarnessBuilderRegister` path.
 
 ## Public API
 

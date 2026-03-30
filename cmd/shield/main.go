@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -26,6 +27,7 @@ type shieldCliState struct {
 	resultsDir string
 	lastResult string
 	configPath string
+	configDir  string
 	config     shieldCliConfig
 }
 
@@ -43,6 +45,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	configAbsPath, err := filepath.Abs(configPath)
+	if err != nil {
+		fmt.Println(shieldCliColorBold("failed to resolve config path: "+err.Error(), ansiRed))
+		os.Exit(1)
+	}
+
+	configDir := filepath.Dir(configAbsPath)
+
 	resultsDir := config.ResultsDir
 	if envResultsDir := shieldCliResultsDirResolve(); envResultsDir != "" {
 		resultsDir = envResultsDir
@@ -52,6 +62,7 @@ func main() {
 		resultsDir: resultsDir,
 		lastResult: "",
 		configPath: configPath,
+		configDir:  configDir,
 		config:     config,
 	}
 

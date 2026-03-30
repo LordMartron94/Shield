@@ -13,4 +13,20 @@ persist = true
 
 # json | txt | both
 mode = "json"
+out_dir = ""
+
+# Optional named targets used via: run <target>
+[targets.fast]
+mode = "json"
+persist = true
+
+[targets.ci]
+mode = "both"
+persist = true
+
+[targets.tests]
+entrypoint_kind = "go_test"
+entrypoint = "./tests"
+test_run_pattern = "^TestShieldFrameworkSample$"
+entrypoint_args = ["-count=1", "-v"]
 
