@@ -35,10 +35,6 @@ type shieldCliResultFileMeta struct {
 
 func shieldCliResultsDirResolve() string {
 	env := strings.TrimSpace(os.Getenv("SHIELD_RESULTS_DIR"))
-	if env == "" {
-		return shieldCliDefaultResultsDir
-	}
-
 	return env
 }
 

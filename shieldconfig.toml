@@ -1,0 +1,16 @@
+# Shield CLI configuration.
+# Load with: go run ./cmd/shield -config=shieldconfig.toml
+
+results_dir = "results/tests"
+
+[run]
+# Comma-free list values; exact name match against registered units/atoms.
+unit_blacklist = []
+atom_blacklist = []
+
+# true -> write run artifacts using configured mode.
+persist = true
+
+# json | txt | both
+mode = "json"
+

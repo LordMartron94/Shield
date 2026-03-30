@@ -32,9 +32,9 @@ func shieldCliRegisterRunCommands() {
 
 			fs.StringVar(&unitBlacklistRaw, "unit", "", "comma-separated unit blacklist")
 			fs.StringVar(&atomBlacklistRaw, "atom", "", "comma-separated atom blacklist")
-			fs.StringVar(&modeRaw, "mode", "json", "persistence mode: json|txt|both")
+			fs.StringVar(&modeRaw, "mode", state.config.Run.Mode, "persistence mode: json|txt|both")
 			fs.StringVar(&outDirRaw, "out", state.resultsDir, "report output directory")
-			fs.BoolVar(&persistEnabled, "persist", true, "persist run report files")
+			fs.BoolVar(&persistEnabled, "persist", state.config.Run.Persist, "persist run report files")
 
 			if err := fs.Parse(args); err != nil {
 				return
@@ -46,8 +46,8 @@ func shieldCliRegisterRunCommands() {
 				return
 			}
 
-			unitBlacklist := shieldCliSplitCSV(unitBlacklistRaw)
-			atomBlacklist := shieldCliSplitCSV(atomBlacklistRaw)
+			unitBlacklist := shieldCliStringListMerge(state.config.Run.UnitBlacklist, shieldCliSplitCSV(unitBlacklistRaw))
+			atomBlacklist := shieldCliStringListMerge(state.config.Run.AtomBlacklist, shieldCliSplitCSV(atomBlacklistRaw))
 
 			engine := shield.EngineCreate(*cfg)
 			runtimeCfg := shield.RuntimeConfigurationCreate(unitBlacklist, atomBlacklist)
@@ -254,6 +254,18 @@ func shieldCliRegisterUtilityCommands() {
 			for _, key := range keys {
 				fmt.Printf("  %-10s - %s\n", key, commands[key].desc)
 			}
+		},
+	}
+
+	commands["config"] = command{
+		desc: "Show loaded config and effective defaults",
+		run: func(_ []string, state *shieldCliState) {
+			fmt.Println("config path:", state.configPath)
+			fmt.Println("results_dir:", state.resultsDir)
+			fmt.Println("run.mode:", state.config.Run.Mode)
+			fmt.Println("run.persist:", state.config.Run.Persist)
+			fmt.Println("run.unit_blacklist:", strings.Join(state.config.Run.UnitBlacklist, ","))
+			fmt.Println("run.atom_blacklist:", strings.Join(state.config.Run.AtomBlacklist, ","))
 		},
 	}
 

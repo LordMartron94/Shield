@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -19,14 +20,33 @@ type command struct {
 type shieldCliState struct {
 	resultsDir string
 	lastResult string
+	configPath string
+	config     shieldCliConfig
 }
 
 var commands = map[string]command{}
 
 func main() {
+	var configPath string
+	flag.StringVar(&configPath, "config", "shieldconfig.toml", "Path to the Shield CLI configuration TOML file")
+	flag.Parse()
+
+	config, err := shieldCliConfigLoad(configPath)
+	if err != nil {
+		fmt.Println("failed to load config:", err.Error())
+		os.Exit(1)
+	}
+
+	resultsDir := config.ResultsDir
+	if envResultsDir := shieldCliResultsDirResolve(); envResultsDir != "" {
+		resultsDir = envResultsDir
+	}
+
 	state := shieldCliState{
-		resultsDir: shieldCliResultsDirResolve(),
+		resultsDir: resultsDir,
 		lastResult: "",
+		configPath: configPath,
+		config:     config,
 	}
 
 	shieldCliRunShell(&state)

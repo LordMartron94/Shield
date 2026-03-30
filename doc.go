@@ -48,7 +48,7 @@ Typical flow:
     ReportDocumentSchemaVersion (2 adds extended duration aggregates); see README for filename pattern
     and limitations (no per-atom rows; quartiles/tail percentiles are noisy for very small n).
  6. Optional CLI flow: register CLIHarnessBuilderRegister(func() (*Configuration, error) { ... }),
-    then run `go run ./cmd/shield` and execute `run`, `list`, `show`, `delete`, `clean`,
+    then run `go run ./cmd/shield -config=shieldconfig.toml` and execute `run`, `list`, `show`, `delete`, `clean`,
     `baseline`, `help`.
 
 Validators return AtomResult by value. Use *AtomResultSuccessCreate(), *AtomResultFailureCreate(reason),

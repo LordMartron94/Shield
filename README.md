@@ -31,7 +31,7 @@ Shield includes an Anvil-style interactive CLI under `./cmd/shield`:
 
 ```bash
 cd tools/shield
-go run ./cmd/shield
+go run ./cmd/shield -config=shieldconfig.toml
 ```
 
 The CLI is explicit by design: it does not auto-discover domain tests. Register a harness builder from your domain package:
@@ -63,6 +63,30 @@ Then in the CLI:
 - `--persist=true|false` toggle persistence
 
 Result directory defaults to `results/tests`, overrideable via `SHIELD_RESULTS_DIR` or `run --out`.
+
+### TOML configuration
+
+Shield CLI supports a TOML config (similar to Anvil's benchconfig flow) through:
+
+```bash
+go run ./cmd/shield -config=shieldconfig.toml
+```
+
+Template file: `tools/shield/shieldconfig.toml`
+
+Supported keys:
+
+- `results_dir` default output directory for report management commands and `run`
+- `[run].unit_blacklist` default unit blacklist for `run`
+- `[run].atom_blacklist` default atom blacklist for `run`
+- `[run].persist` default persistence toggle for `run`
+- `[run].mode` default persistence mode (`json|txt|both`) for `run`
+
+Precedence for `run`:
+
+1. Explicit CLI flags (`--unit`, `--atom`, `--persist`, `--mode`, `--out`)
+2. TOML defaults
+3. Built-in defaults
 
 ## Public API
 
