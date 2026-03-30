@@ -13,7 +13,7 @@ Shield is not a substitute for Go’s `testing` package or a full test runner wi
 | **Configuration** | Top-level list of units you pass to `EngineCreate`. |
 | **Unit** | Named group with an `order` field (lower runs first among siblings). Can contain **sub-units** (run first, also ordered) then **atoms**. |
 | **Atom** | One check: a `Runner`, a `Validator`, and registered **cases**. Also ordered by `order`. |
-| **Case** | Named `input` / `expected` pair for one run of the atom’s runner. |
+| **Case** | Named input for one run of the atom’s runner, with optional expected output. |
 | **Engine** | Runnable snapshot built from a `Configuration`. |
 | **RunReport** | Returned by `Run` / `RunWithReportPersistence`: `Failed`, `Elapsed`, `TopLevel`, optional `WrittenReportPath` when persistence wrote a file. |
 | **ReportPersistence** | Output directory, enable flag, `ReportPersistenceMode` (JSON / TXT / JSONAndTXT), or custom `ReportPersistAdapter`. |
@@ -24,6 +24,45 @@ Shield is not a substitute for Go’s `testing` package or a full test runner wi
 | **UnitEvaluationGate** | `func(UnitRunReport) bool` — return `true` if the unit counts as **failed** (for parents and stop-on-child). |
 
 Validators return an `AtomResult` **by value**. Helpers return pointers; dereference when returning, for example `return *shield.AtomResultFailureCreate("reason")`. Use `AtomResultSetSkipFurtherAtomsInUnit` to stop running later atoms in the **current** unit after the current atom completes.
+
+## Shield CLI (interactive)
+
+Shield includes an Anvil-style interactive CLI under `./cmd/shield`:
+
+```bash
+cd tools/shield
+go run ./cmd/shield
+```
+
+The CLI is explicit by design: it does not auto-discover domain tests. Register a harness builder from your domain package:
+
+```go
+shield.CLIHarnessBuilderRegister(func() (*shield.Configuration, error) {
+    cfg := shield.ConfigurationCreate()
+    // register units/atoms/cases here
+    return cfg, nil
+})
+```
+
+Then in the CLI:
+
+- `run` executes the registered harness
+- `list` / `ls` lists persisted run artifacts
+- `show <latest|index|file>` prints report metadata
+- `delete <latest|index|file>` deletes a report (with confirmation)
+- `clean` deletes all Shield artifacts in the active results directory
+- `baseline show|set <latest|index|file>|clear` manages a pinned baseline pointer
+- `help`, `quit`, `exit`
+
+`run` supports:
+
+- `--unit=a,b,c` unit blacklist
+- `--atom=x,y,z` atom blacklist
+- `--mode=json|txt|both` persistence mode
+- `--out=<dir>` output directory override
+- `--persist=true|false` toggle persistence
+
+Result directory defaults to `results/tests`, overrideable via `SHIELD_RESULTS_DIR` or `run --out`.
 
 ## Public API
 

@@ -1,6 +1,9 @@
 package shield
 
-import "shield/internal"
+import (
+	"fmt"
+	"shield/internal"
+)
 
 /*
 AtomResult records the outcome of validating one case. The zero value is not a valid
@@ -123,9 +126,46 @@ ReportPersistAdapter writes RunReport and RunMetrics to outputDir; return the pr
 type ReportPersistAdapter = internal.ShieldReportPersistAdapter
 
 /*
+CLIHarnessBuilder builds a Shield configuration for the interactive Shield CLI run command.
+Register one builder from domain code, then invoke the CLI tool to run the registered graph.
+*/
+type CLIHarnessBuilder func() (*Configuration, error)
+
+var shieldCliHarnessBuilder CLIHarnessBuilder
+
+/*
 ReportDocumentSchemaVersion is the schema_version field written to JSON report files.
 */
 const ReportDocumentSchemaVersion = internal.ShieldReportDocumentSchemaVersion
+
+/*
+CLIHarnessBuilderRegister stores the builder used by the Shield CLI run command.
+Pass nil to clear a previous registration.
+*/
+func CLIHarnessBuilderRegister(builder CLIHarnessBuilder) {
+	shieldCliHarnessBuilder = builder
+}
+
+/*
+CLIHarnessConfigurationBuild executes the registered Shield CLI harness builder.
+Returns an error when no builder is registered or the builder returns an invalid configuration.
+*/
+func CLIHarnessConfigurationBuild() (*Configuration, error) {
+	if shieldCliHarnessBuilder == nil {
+		return nil, fmt.Errorf("no shield CLI harness registered; call shield.CLIHarnessBuilderRegister from your test domain package")
+	}
+
+	cfg, err := shieldCliHarnessBuilder()
+	if err != nil {
+		return nil, err
+	}
+
+	if cfg == nil {
+		return nil, fmt.Errorf("shield CLI harness builder returned nil configuration")
+	}
+
+	return cfg, nil
+}
 
 /*
 ReportPersistenceCreate returns persistence state for an output directory (cleaned at write time).

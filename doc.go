@@ -19,6 +19,10 @@ build a Configuration, register units, then Run.
 Logging is emitted through the echo subsystem registered by this module (prefix "Shield").
 Failures in runner or validator paths are recovered, logged, and do not crash the process.
 
+The module also ships an optional interactive CLI at ./cmd/shield. The CLI intentionally
+does not discover domain tests implicitly; instead clients register a builder callback through
+CLIHarnessBuilderRegister so the CLI can request a fully-formed Configuration.
+
 After each Run, a structured "Shield run summary" line is logged via echo (field `summary` true)
 with aggregate counts from the report tree; when any atoms executed, per-atom wall times are copied
 into a manual-memory vector and summarized with statarch (mean, population standard deviation, sum,
@@ -43,6 +47,9 @@ Typical flow:
     for a custom persister, then RunWithReportPersistence. Persisted JSON uses schema_version
     ReportDocumentSchemaVersion (2 adds extended duration aggregates); see README for filename pattern
     and limitations (no per-atom rows; quartiles/tail percentiles are noisy for very small n).
+ 6. Optional CLI flow: register CLIHarnessBuilderRegister(func() (*Configuration, error) { ... }),
+    then run `go run ./cmd/shield` and execute `run`, `list`, `show`, `delete`, `clean`,
+    `baseline`, `help`.
 
 Validators return AtomResult by value. Use *AtomResultSuccessCreate(), *AtomResultFailureCreate(reason),
 and the AtomResultSet* helpers when you need notes or to skip remaining atoms in the current unit.
