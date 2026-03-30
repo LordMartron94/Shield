@@ -17,6 +17,11 @@ type command struct {
 	run  commandFunc
 }
 
+type commandHelpEntry struct {
+	keys []string
+	desc string
+}
+
 type shieldCliState struct {
 	resultsDir string
 	lastResult string
@@ -25,6 +30,7 @@ type shieldCliState struct {
 }
 
 var commands = map[string]command{}
+var commandHelp = make([]commandHelpEntry, 0)
 
 func main() {
 	var configPath string
@@ -33,7 +39,7 @@ func main() {
 
 	config, err := shieldCliConfigLoad(configPath)
 	if err != nil {
-		fmt.Println("failed to load config:", err.Error())
+		fmt.Println(shieldCliColorBold("failed to load config: "+err.Error(), ansiRed))
 		os.Exit(1)
 	}
 
@@ -56,10 +62,10 @@ func shieldCliRunShell(state *shieldCliState) {
 	shieldCliRegisterCommands()
 
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Shield CLI - type 'help' for commands")
+	fmt.Println(shieldCliColorBold("Shield CLI", ansiCyan), "-", shieldCliColor("type 'help' for commands", ansiGray))
 
 	for {
-		fmt.Print("shield> ")
+		fmt.Print(shieldCliColorBold("shield> ", ansiBlue))
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -67,7 +73,7 @@ func shieldCliRunShell(state *shieldCliState) {
 				return
 			}
 
-			fmt.Println("read error:", err.Error())
+			fmt.Println(shieldCliColorBold("read error: "+err.Error(), ansiRed))
 			continue
 		}
 
@@ -79,10 +85,26 @@ func shieldCliRunShell(state *shieldCliState) {
 		parts := strings.Fields(line)
 		cmd, ok := commands[parts[0]]
 		if !ok {
-			fmt.Println("unknown command; type 'help'")
+			fmt.Println(shieldCliColor("unknown command; type 'help'", ansiRed))
 			continue
 		}
 
 		cmd.run(parts[1:], state)
 	}
+}
+
+func shieldCliRegisterCommand(keys []string, desc string, run commandFunc) {
+	if len(keys) == 0 {
+		panic("shield cli command registration requires at least one key")
+	}
+
+	cmd := command{desc: desc, run: run}
+	for _, key := range keys {
+		commands[key] = cmd
+	}
+
+	commandHelp = append(commandHelp, commandHelpEntry{
+		keys: keys,
+		desc: desc,
+	})
 }
