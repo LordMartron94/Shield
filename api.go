@@ -53,10 +53,15 @@ type Unit = internal.ShieldUnit
 
 /*
 UnitRunReport summarizes one execution of a unit: blacklist/setup skips, atom failures
-(including setup failures before cases), panics, and direct child outcomes in run order.
+(including setup failures before cases), panics, per-atom outcomes, and direct child outcomes in run order.
 Custom evaluation gates receive this after the unit finishes the work it was scheduled to perform.
 */
 type UnitRunReport = internal.ShieldUnitRunReport
+
+/*
+UnitAtomOutcome records one atom execution outcome inside UnitRunReport.Atoms.
+*/
+type UnitAtomOutcome = internal.ShieldUnitAtomOutcome
 
 /*
 UnitChildOutcome binds a direct sub-unit’s name to whether it was classified as failed and its full report.
@@ -457,8 +462,8 @@ func EngineCreate(cfg Configuration) *Engine {
 
 /*
 Run walks all registered units in order, respecting runtime blacklists, running sub-units
-and atoms, and logging timing via echo. After the run it logs a structured Shield run summary
-(counts and, when atoms executed, statarch/blaze-backed duration statistics). The returned
+and atoms, and emits semantic run lifecycle events through the default Shield console reporter.
+The returned
 RunReport aggregates top-level failure and full nested reports; Failed follows each unit’s
 UnitEvaluationGate or UnitEvaluationDefaultFailed.
 */

@@ -118,7 +118,19 @@ type ShieldReportUnitReport struct {
 	AtomValidationFailures     int                     `json:"atom_validation_failures"`
 	AtomPanics                 int                     `json:"atom_panics"`
 	TerminatedSubUnitLoopEarly bool                    `json:"terminated_subunit_loop_early"`
+	Atoms                      []ShieldReportAtomNode  `json:"atoms"`
 	DirectChildren             []ShieldReportChildNode `json:"direct_children"`
+}
+
+type ShieldReportAtomNode struct {
+	Name                  string `json:"name"`
+	Failed                bool   `json:"failed"`
+	SkippedDueToBlacklist bool   `json:"skipped_due_to_blacklist"`
+	SkippedDueToSetup     bool   `json:"skipped_due_to_setup"`
+	ValidationFailures    int    `json:"validation_failures"`
+	Panics                int    `json:"panics"`
+	ElapsedNs             int64  `json:"elapsed_ns"`
+	ElapsedHuman          string `json:"elapsed_human"`
 }
 
 type ShieldReportChildNode struct {
@@ -152,7 +164,22 @@ func shieldReportUnitReportMapFromRun(r ShieldUnitRunReport) ShieldReportUnitRep
 		AtomValidationFailures:     r.AtomValidationFailures,
 		AtomPanics:                 r.AtomPanics,
 		TerminatedSubUnitLoopEarly: r.TerminatedSubUnitLoopEarly,
+		Atoms:                      make([]ShieldReportAtomNode, 0, len(r.Atoms)),
 		DirectChildren:             make([]ShieldReportChildNode, 0, len(r.DirectChildren)),
+	}
+
+	for _, atom := range r.Atoms {
+		elapsedNs := atom.Elapsed.Nanoseconds()
+		out.Atoms = append(out.Atoms, ShieldReportAtomNode{
+			Name:                  atom.Name,
+			Failed:                atom.Failed,
+			SkippedDueToBlacklist: atom.SkippedDueToBlacklist,
+			SkippedDueToSetup:     atom.SkippedDueToSetup,
+			ValidationFailures:    atom.ValidationFailures,
+			Panics:                atom.Panics,
+			ElapsedNs:             elapsedNs,
+			ElapsedHuman:          formatting.FormatDurationNSF64(float64(elapsedNs)),
+		})
 	}
 
 	for _, ch := range r.DirectChildren {
@@ -389,59 +416,135 @@ func shieldReportOpenExclusive(dir, base string) (path string, f *os.File, err e
 func shieldReportDocumentFormatTXT(doc ShieldReportDocument) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "Shield run report (schema %d)\n", doc.SchemaVersion)
-	fmt.Fprintf(&b, "Written: %s\n", doc.WrittenAt)
-	fmt.Fprintf(&b, "Run failed: %v\n", doc.RunFailed)
-	fmt.Fprintf(&b, "Elapsed: %s (%d ns)\n\n", doc.ElapsedHuman, doc.ElapsedNs)
-
-	s := doc.Summary
-	fmt.Fprintf(&b, "Summary\n")
-	fmt.Fprintf(&b, "  Units visited: %d\n", s.UnitsVisited)
-	fmt.Fprintf(&b, "  Units skipped (blacklist): %d\n", s.UnitsSkippedBlacklist)
-	fmt.Fprintf(&b, "  Units skipped (setup): %d\n", s.UnitsSkippedSetup)
-	fmt.Fprintf(&b, "  Atom validation failures: %d\n", s.AtomValidationFailures)
-	fmt.Fprintf(&b, "  Atom panics: %d\n", s.AtomPanics)
-	fmt.Fprintf(&b, "  Atom setup failures: %d\n", s.AtomSetupFailures)
-	fmt.Fprintf(&b, "  Sub-unit loop early stops: %d\n", s.SubUnitLoopEarlyStops)
-	fmt.Fprintf(&b, "  Units failed (gate): %d\n", s.UnitsFailedGate)
-
-	if s.Duration != nil {
-		fmt.Fprintf(&b, "\nAtom duration (timed atoms: %d)\n", s.Duration.AtomsTimed)
-		if s.Duration.StatsError != "" {
-			fmt.Fprintf(&b, "  Stats error: %s\n", s.Duration.StatsError)
-		} else {
-			fmt.Fprintf(&b, "  Sum: %.0f ns\n", s.Duration.SumNs)
-			fmt.Fprintf(&b, "  Mean: %s (%.0f ns)\n", s.Duration.MeanHuman, s.Duration.MeanNs)
-			fmt.Fprintf(&b, "  Stddev (pop): %.0f ns\n", s.Duration.StddevPopNs)
-			fmt.Fprintf(&b, "  Min: %s (%.0f ns)\n", s.Duration.MinHuman, s.Duration.MinNs)
-			fmt.Fprintf(&b, "  Q1: %.0f ns\n", s.Duration.Q1Ns)
-			fmt.Fprintf(&b, "  Median: %s (%.0f ns)\n", s.Duration.MedianHuman, s.Duration.MedianNs)
-			fmt.Fprintf(&b, "  Q3: %.0f ns\n", s.Duration.Q3Ns)
-			fmt.Fprintf(&b, "  IQR: %.0f ns\n", s.Duration.IQRNs)
-			fmt.Fprintf(&b, "  P95: %s (%.0f ns)\n", s.Duration.P95Human, s.Duration.P95Ns)
-			fmt.Fprintf(&b, "  P99: %s (%.0f ns)\n", s.Duration.P99Human, s.Duration.P99Ns)
-			fmt.Fprintf(&b, "  Max: %s (%.0f ns)\n", s.Duration.MaxHuman, s.Duration.MaxNs)
-			if s.Duration.AtomsTimed >= 2 && math.Abs(s.Duration.MeanNs) > shieldDurationMeanEpsilonNs {
-				fmt.Fprintf(&b, "  Coeff var (pop): %g\n", s.Duration.CoeffVarPop)
-			}
-		}
-	}
-
-	b.WriteString("\nUnit tree (aggregates only; per-atom rows not in schema v2)\n")
-	for _, top := range doc.Tree {
-		shieldReportWriteTXTUnit(&b, top.Name, top.Failed, top.Report, 0)
-	}
+	shieldReportWriteTXTHeader(&b, doc)
+	shieldReportWriteTXTVerdictBlock(&b, doc)
+	shieldReportWriteTXTSummary(&b, doc.Summary)
+	shieldReportWriteTXTDuration(&b, doc.Summary.Duration)
+	shieldReportWriteTXTTree(&b, doc.Tree)
 
 	return b.String()
 }
 
+func shieldReportWriteTXTHeader(b *strings.Builder, doc ShieldReportDocument) {
+	runResult := "PASSED"
+	if doc.RunFailed {
+		runResult = "FAILED"
+	}
+
+	fmt.Fprintf(b, "Shield run report (schema %d)\n", doc.SchemaVersion)
+	fmt.Fprintf(b, "Written: %s\n", doc.WrittenAt)
+	fmt.Fprintf(b, "Result: %s\n", runResult)
+	fmt.Fprintf(b, "Run failed: %v\n", doc.RunFailed)
+	fmt.Fprintf(b, "Elapsed: %s (%d ns)\n\n", doc.ElapsedHuman, doc.ElapsedNs)
+}
+
+func shieldReportWriteTXTVerdictBlock(b *strings.Builder, doc ShieldReportDocument) {
+	fmt.Fprintf(b, "[==========] Shield run complete (%s)\n", doc.ElapsedHuman)
+
+	if doc.RunFailed {
+		fmt.Fprintf(b, "[  FAILED  ] %d units failed.\n\n", doc.Summary.UnitsFailedGate)
+		return
+	}
+
+	b.WriteString("[  PASSED  ] All units passed.\n\n")
+}
+
+func shieldReportWriteTXTSummary(b *strings.Builder, s ShieldReportSummary) {
+	fmt.Fprintf(b, "Summary\n")
+	fmt.Fprintf(b, "  Units visited: %d\n", s.UnitsVisited)
+	fmt.Fprintf(b, "  Units skipped (blacklist): %d\n", s.UnitsSkippedBlacklist)
+	fmt.Fprintf(b, "  Units skipped (setup): %d\n", s.UnitsSkippedSetup)
+	fmt.Fprintf(b, "  Atom validation failures: %d\n", s.AtomValidationFailures)
+	fmt.Fprintf(b, "  Atom panics: %d\n", s.AtomPanics)
+	fmt.Fprintf(b, "  Atom setup failures: %d\n", s.AtomSetupFailures)
+	fmt.Fprintf(b, "  Sub-unit loop early stops: %d\n", s.SubUnitLoopEarlyStops)
+	fmt.Fprintf(b, "  Units failed (gate): %d\n", s.UnitsFailedGate)
+}
+
+func shieldReportWriteTXTDuration(b *strings.Builder, d *ShieldReportDurationSummary) {
+	if d == nil {
+		return
+	}
+
+	fmt.Fprintf(b, "\nAtom duration (timed atoms: %d)\n", d.AtomsTimed)
+	if d.StatsError != "" {
+		fmt.Fprintf(b, "  Stats error: %s\n", d.StatsError)
+		return
+	}
+
+	shieldReportWriteTXTDurationStatsOK(b, d)
+}
+
+func shieldReportWriteTXTDurationStatsOK(b *strings.Builder, d *ShieldReportDurationSummary) {
+	fmt.Fprintf(b, "  Sum: %.0f ns\n", d.SumNs)
+	fmt.Fprintf(b, "  Mean: %s (%.0f ns)\n", d.MeanHuman, d.MeanNs)
+	fmt.Fprintf(b, "  Stddev (pop): %.0f ns\n", d.StddevPopNs)
+	fmt.Fprintf(b, "  Min: %s (%.0f ns)\n", d.MinHuman, d.MinNs)
+	fmt.Fprintf(b, "  Q1: %.0f ns\n", d.Q1Ns)
+	fmt.Fprintf(b, "  Median: %s (%.0f ns)\n", d.MedianHuman, d.MedianNs)
+	fmt.Fprintf(b, "  Q3: %.0f ns\n", d.Q3Ns)
+	fmt.Fprintf(b, "  IQR: %.0f ns\n", d.IQRNs)
+	fmt.Fprintf(b, "  P95: %s (%.0f ns)\n", d.P95Human, d.P95Ns)
+	fmt.Fprintf(b, "  P99: %s (%.0f ns)\n", d.P99Human, d.P99Ns)
+	fmt.Fprintf(b, "  Max: %s (%.0f ns)\n", d.MaxHuman, d.MaxNs)
+	if d.AtomsTimed >= 2 && math.Abs(d.MeanNs) > shieldDurationMeanEpsilonNs {
+		fmt.Fprintf(b, "  Coeff var (pop): %g\n", d.CoeffVarPop)
+	}
+}
+
+func shieldReportWriteTXTTree(b *strings.Builder, tree []ShieldReportTopNode) {
+	b.WriteString("\nTop-level outcomes\n")
+	for _, top := range tree {
+		status := "PASSED"
+		if top.Failed {
+			status = "FAILED"
+		}
+
+		fmt.Fprintf(b, "  - %s: %s\n", top.Name, status)
+	}
+
+	b.WriteString("\nUnit tree (includes atom rows)\n")
+	for _, top := range tree {
+		shieldReportWriteTXTUnit(b, top.Name, top.Failed, top.Report, 0)
+	}
+}
+
 func shieldReportWriteTXTUnit(b *strings.Builder, name string, failed bool, r ShieldReportUnitReport, depth int) {
 	ind := strings.Repeat("  ", depth)
+	status := "PASSED"
+	if failed {
+		status = "FAILED"
+	}
 
-	fmt.Fprintf(b, "%s- %s (failed=%v)\n", ind, name, failed)
-	fmt.Fprintf(b, "%s  blacklist=%v setup_skip=%v atom_val_fail=%d atom_panic=%d atom_setup_fail=%d subunit_early=%v\n",
-		ind, r.SkippedDueToBlacklist, r.SkippedDueToSetup, r.AtomValidationFailures, r.AtomPanics,
+	skipState := "none"
+	if r.SkippedDueToBlacklist {
+		skipState = "blacklist"
+	} else if r.SkippedDueToSetup {
+		skipState = "setup"
+	}
+
+	fmt.Fprintf(b, "%s- %s (status=%s)\n", ind, name, status)
+	fmt.Fprintf(b, "%s  skip=%s atom_val_fail=%d atom_panic=%d atom_setup_fail=%d subunit_early=%v\n",
+		ind, skipState, r.AtomValidationFailures, r.AtomPanics,
 		r.AtomSetupFailureCount, r.TerminatedSubUnitLoopEarly)
+
+	for _, atom := range r.Atoms {
+		atomStatus := "PASSED"
+		if atom.Failed {
+			atomStatus = "FAILED"
+		}
+
+		atomSkip := "none"
+		if atom.SkippedDueToBlacklist {
+			atomSkip = "blacklist"
+		} else if atom.SkippedDueToSetup {
+			atomSkip = "setup"
+		}
+
+		fmt.Fprintf(b, "%s  * atom %s (status=%s)\n", ind, atom.Name, atomStatus)
+		fmt.Fprintf(b, "%s    skip=%s val_fail=%d panic=%d elapsed=%s (%d ns)\n",
+			ind, atomSkip, atom.ValidationFailures, atom.Panics, atom.ElapsedHuman, atom.ElapsedNs)
+	}
 
 	for _, ch := range r.DirectChildren {
 		shieldReportWriteTXTUnit(b, ch.Name, ch.Failed, ch.Report, depth+1)

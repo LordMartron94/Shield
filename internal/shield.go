@@ -72,6 +72,16 @@ type ShieldUnitChildOutcome struct {
 	Report ShieldUnitRunReport
 }
 
+type ShieldUnitAtomOutcome struct {
+	Name                  string
+	Failed                bool
+	SkippedDueToBlacklist bool
+	SkippedDueToSetup     bool
+	ValidationFailures    int
+	Panics                int
+	Elapsed               time.Duration
+}
+
 type ShieldUnitRunReport struct {
 	Name string
 
@@ -83,6 +93,8 @@ type ShieldUnitRunReport struct {
 	AtomPanics             int
 
 	TerminatedSubUnitLoopEarly bool
+
+	Atoms []ShieldUnitAtomOutcome
 
 	DirectChildren []ShieldUnitChildOutcome
 }
@@ -418,9 +430,10 @@ func shieldRunExecute(
 
 	tel := &shieldRunTelemetry{atomDurationsNs: make([]float64, 0)}
 	runIO := shieldRunIOCreateDefault(persist)
+	runIO.reporter.OnRunStart(len(sorted))
 
 	for _, unit := range sorted {
-		unitReport := shieldUnitRun(unit, runtimeCfg, tel, runIO.logger)
+		unitReport := shieldUnitRun(unit, runtimeCfg, tel, runIO.reporter)
 		failed := shieldUnitEvaluationFailed(unit, unitReport)
 
 		report.TopLevel = append(report.TopLevel, ShieldUnitChildOutcome{
@@ -437,9 +450,8 @@ func shieldRunExecute(
 	endShield := time.Now()
 	report.Elapsed = endShield.Sub(startShield)
 
-	runIO.logger.LogDuration("SHIELD run", report.Elapsed)
-
 	metrics := shieldRunMetricsBuild(report, tel)
+	runIO.reporter.OnRunEnd(report, metrics)
 	runIO.summaryEmitter(report, metrics)
 	writtenReportPath := runIO.reportWriter(report, metrics)
 
@@ -453,38 +465,45 @@ func shieldRunExecute(
 
 type shieldAtomRunStats struct {
 	setupFailedBeforeCases bool
+	skippedDueToBlacklist  bool
 	validationFailures     int
 	panics                 int
 	skipRestOfUnit         bool
+	elapsed                time.Duration
+	failed                 bool
 }
 
 type shieldAtomCaseOutcome struct {
 	skipRestOfUnit       bool
 	hadValidationFailure bool
 	hadPanic             bool
+	panicStage           string
+	panicMessage         string
+	validationResult     *ShieldAtomResult
 }
 
 func shieldUnitRun(
 	unit ShieldUnit,
 	runtimeCfg *ShieldRuntimeConfiguration,
 	tel *shieldRunTelemetry,
-	logger shieldRunEventLogger,
+	reporter shieldRunReporter,
 ) ShieldUnitRunReport {
-	report := ShieldUnitRunReport{Name: unit.name}
+	report := ShieldUnitRunReport{
+		Name:  unit.name,
+		Atoms: make([]ShieldUnitAtomOutcome, 0),
+	}
 
-	label := fmt.Sprintf("unit %s", shieldUnitFormatLabel(unit))
-
-	if success := runSetup(label, unit.setup, logger); !success {
-		logger.LogTemplate("skipping", label)
+	if success := runSetup("unit", unit.name, unit.setup, reporter); !success {
+		reporter.OnSkip("unit", unit.name, "setup_failed")
 		report.SkippedDueToSetup = true
 
 		return report
 	}
 
-	defer runTeardown(label, unit.teardown, logger)
+	defer runTeardown("unit", unit.name, unit.teardown, reporter)
 
 	if slices.Contains(runtimeCfg.blacklistedUnits, unit.name) {
-		logger.LogTemplate("skipping", label)
+		reporter.OnSkip("unit", unit.name, "blacklist")
 		report.SkippedDueToBlacklist = true
 
 		return report
@@ -493,13 +512,13 @@ func shieldUnitRun(
 	atoms := shieldUnitGetSortedAtoms(unit)
 	sortedSubs := shieldUnitGetSortedSubUnits(unit)
 
-	logger.LogTemplate("starting", label)
+	reporter.OnUnitStart(unit.name)
 	startUnit := time.Now()
 
 	childFailureStopped := false
 
 	for _, subUnit := range sortedSubs {
-		subReport := shieldUnitRun(subUnit, runtimeCfg, tel, logger)
+		subReport := shieldUnitRun(subUnit, runtimeCfg, tel, reporter)
 		subFailed := shieldUnitEvaluationFailed(subUnit, subReport)
 
 		report.DirectChildren = append(report.DirectChildren, ShieldUnitChildOutcome{
@@ -512,7 +531,7 @@ func shieldUnitRun(
 			report.TerminatedSubUnitLoopEarly = true
 			childFailureStopped = true
 
-			logger.LogPolicy(fmt.Sprintf(
+			reporter.OnPolicy(fmt.Sprintf(
 				"stopping remaining sub-units of '%s' after failed sub-unit '%s' (policy)",
 				unit.name, subUnit.name))
 
@@ -524,7 +543,16 @@ func shieldUnitRun(
 
 	if !skipAtoms {
 		for _, atom := range atoms {
-			atomStats := shieldAtomRun(atom, runtimeCfg, tel, logger)
+			atomStats := shieldAtomRun(unit.name, atom, runtimeCfg, tel, reporter)
+			report.Atoms = append(report.Atoms, ShieldUnitAtomOutcome{
+				Name:                  atom.name,
+				Failed:                atomStats.failed,
+				SkippedDueToBlacklist: atomStats.skippedDueToBlacklist,
+				SkippedDueToSetup:     atomStats.setupFailedBeforeCases,
+				ValidationFailures:    atomStats.validationFailures,
+				Panics:                atomStats.panics,
+				Elapsed:               atomStats.elapsed,
+			})
 
 			if atomStats.setupFailedBeforeCases {
 				report.AtomSetupFailureCount++
@@ -534,64 +562,72 @@ func shieldUnitRun(
 			report.AtomPanics += atomStats.panics
 
 			if atomStats.skipRestOfUnit {
-				logger.LogPolicy(fmt.Sprintf("skipping rest of unit '%s' in accordance to evaluation result", unit.name))
+				reporter.OnPolicy(fmt.Sprintf("skipping rest of unit '%s' in accordance to evaluation result", unit.name))
 				break
 			}
 		}
 	} else {
-		logger.LogPolicy(fmt.Sprintf(
+		reporter.OnPolicy(fmt.Sprintf(
 			"skipping atoms of unit '%s' after sub-unit failure (policy)",
 			unit.name))
 	}
 
 	finishedUnit := time.Now()
 	elapsedUnit := finishedUnit.Sub(startUnit)
-
-	logger.LogDuration(fmt.Sprintf("unit '%s'", unit.name), elapsedUnit)
+	failed := shieldUnitEvaluationFailed(unit, report)
+	reporter.OnUnitEnd(unit.name, elapsedUnit, report, failed)
 
 	return report
 }
 
 func shieldAtomRun(
+	unitName string,
 	atom ShieldAtom[any, any],
 	runtimeCfg *ShieldRuntimeConfiguration,
 	tel *shieldRunTelemetry,
-	logger shieldRunEventLogger,
+	reporter shieldRunReporter,
 ) shieldAtomRunStats {
 	stats := shieldAtomRunStats{}
 
-	label := fmt.Sprintf("atom %s", shieldAtomFormatLabel(atom))
-
-	if success := runSetup(label, atom.setup, logger); !success {
-		logger.LogTemplate("skipping", label)
+	if success := runSetup("atom", atom.name, atom.setup, reporter); !success {
+		reporter.OnSkip("atom", atom.name, "setup_failed")
 		stats.setupFailedBeforeCases = true
+		stats.failed = true
 
 		return stats
 	}
 
-	defer runTeardown(label, atom.teardown, logger)
+	defer runTeardown("atom", atom.name, atom.teardown, reporter)
 
 	if slices.Contains(runtimeCfg.blacklistedAtoms, atom.name) {
-		logger.LogTemplate("skipping", label)
+		reporter.OnSkip("atom", atom.name, "blacklist")
+		stats.skippedDueToBlacklist = true
 
 		return stats
 	}
 
-	logger.LogTemplate("starting", label)
+	reporter.OnAtomStart(unitName, atom.name)
 
 	startAtom := time.Now()
+	atomFailed := false
 
 	for _, shieldCase := range atom.cases {
-		logger.LogTemplate("running", fmt.Sprintf("case %s", shieldCaseFormatLabel(shieldCase)))
+		reporter.OnCaseStart(unitName, atom.name, shieldCase.name)
 
-		outcome := atomEvaluateCase(atom, shieldCase, logger)
+		outcome := atomEvaluateCase(unitName, atom, shieldCase, reporter)
 
 		if outcome.hadValidationFailure {
 			stats.validationFailures++
+			atomFailed = true
+			if outcome.validationResult != nil {
+				reporter.OnValidationFailed(unitName, atom.name, shieldCase.name, *outcome.validationResult)
+			}
 		}
 
 		if outcome.hadPanic {
 			stats.panics++
+			atomFailed = true
+			reporter.OnCasePanic(unitName, atom.name, shieldCase.name, outcome.panicStage, outcome.panicMessage)
 		}
 
 		if outcome.skipRestOfUnit {
@@ -603,7 +639,9 @@ func shieldAtomRun(
 	finishedAtom := time.Now()
 
 	elapsedAtom := finishedAtom.Sub(startAtom)
-	logger.LogDuration(fmt.Sprintf("atom '%s'", atom.name), elapsedAtom)
+	stats.elapsed = elapsedAtom
+	stats.failed = atomFailed
+	reporter.OnAtomEnd(unitName, atom.name, elapsedAtom, atomFailed)
 
 	if tel != nil {
 		tel.atomDurationsNs = append(tel.atomDurationsNs, float64(elapsedAtom.Nanoseconds()))
@@ -613,30 +651,29 @@ func shieldAtomRun(
 }
 
 func atomEvaluateCase(
+	unitName string,
 	atom ShieldAtom[any, any],
 	shieldCase ShieldCase[any, any],
-	logger shieldRunEventLogger,
+	_ shieldRunReporter,
 ) (outcome shieldAtomCaseOutcome) {
 	defer func() {
 		if r := recover(); r != nil {
 			outcome.hadPanic = true
 
-			label := fmt.Sprintf("atom '%s' - case '%s'", atom.name, shieldCase.name)
 			stack := debug.Stack()
-			failureMsg := fmt.Sprintf("panic recovered: %v\nStack trace:\n%s", r, stack)
-
-			logger.LogStageFailure(label, "execution/validation", failureMsg)
+			outcome.panicStage = "execution/validation"
+			outcome.panicMessage = fmt.Sprintf(
+				"panic recovered in %s.%s.%s: %v\nStack trace:\n%s",
+				unitName, atom.name, shieldCase.name, r, stack)
 		}
 	}()
 
 	output := atom.runner(shieldCase.input)
 	validated := atom.validator(output, shieldCase)
+	outcome.validationResult = &validated
 
 	if !validated.success {
 		outcome.hadValidationFailure = true
-
-		failureMessage := shieldAtomResultFormat(atom, validated)
-		logger.LogFailure(failureMessage)
 	}
 
 	outcome.skipRestOfUnit = validated.skipFurtherAtomsInUnit
@@ -644,15 +681,14 @@ func atomEvaluateCase(
 	return outcome
 }
 
-func runSetup(label string, setup func(), logger shieldRunEventLogger) (succeeded bool) {
+func runSetup(kind, name string, setup func(), reporter shieldRunReporter) (succeeded bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			succeeded = false
 
 			stack := debug.Stack()
 			failureMsg := fmt.Sprintf("panic recovered: %v\nStack trace:\n%s", r, stack)
-
-			logger.LogStageFailure(label, "setup", failureMsg)
+			reporter.OnStageFailure(kind, name, "setup", failureMsg)
 		}
 	}()
 
@@ -660,19 +696,17 @@ func runSetup(label string, setup func(), logger shieldRunEventLogger) (succeede
 		return true
 	}
 
-	logger.LogLifecycle("setup", label)
 	setup()
 
 	return true
 }
 
-func runTeardown(label string, teardown func(), logger shieldRunEventLogger) {
+func runTeardown(kind, name string, teardown func(), reporter shieldRunReporter) {
 	defer func() {
 		if r := recover(); r != nil {
 			stack := debug.Stack()
 			failureMsg := fmt.Sprintf("panic recovered: %v\nStack trace:\n%s", r, stack)
-
-			logger.LogStageFailure(label, "teardown", failureMsg)
+			reporter.OnStageFailure(kind, name, "teardown", failureMsg)
 		}
 	}()
 
@@ -680,6 +714,5 @@ func runTeardown(label string, teardown func(), logger shieldRunEventLogger) {
 		return
 	}
 
-	logger.LogLifecycle("teardown", label)
 	teardown()
 }
