@@ -27,8 +27,10 @@ Atom is one ordered check within a unit: a runner, a validator, and registered c
 type Atom[TInput, TOutput any] = internal.ShieldAtom[TInput, TOutput]
 
 /*
-Case binds a name, input, and expected output for one invocation of an atom’s runner.
-Read fields in validators via CaseNameGet, CaseInputGet, CaseExpectedGet, and CaseDescriptionGet.
+Case binds a name and input for one invocation of an atom’s runner, and may optionally
+carry an expected output when the validation strategy needs one.
+Read fields in validators via CaseNameGet, CaseInputGet, CaseExpectedGet/CaseExpectedTryGet,
+and CaseDescriptionGet.
 */
 type Case[TInput, TOutput any] = internal.ShieldCase[TInput, TOutput]
 
@@ -316,6 +318,14 @@ func CaseCreate[TInput, TOutput any](name string, input TInput, expected TOutput
 }
 
 /*
+CaseCreateWithoutExpected builds a named case from input only.
+Use this for atoms whose validator checks side effects/invariants without needing an expected output value.
+*/
+func CaseCreateWithoutExpected[TInput, TOutput any](name string, input TInput) *Case[TInput, TOutput] {
+	return internal.ShieldCaseCreateWithoutExpected[TInput, TOutput](name, input)
+}
+
+/*
 CaseSetDescription sets optional human-readable text included in log labels.
 */
 func CaseSetDescription[TInput, TOutput any](c *Case[TInput, TOutput], description string) {
@@ -341,6 +351,14 @@ CaseExpectedGet returns the expected output clients associate with this case (va
 */
 func CaseExpectedGet[TInput, TOutput any](c Case[TInput, TOutput]) TOutput {
 	return internal.ShieldCaseExpectedGet(c)
+}
+
+/*
+CaseExpectedTryGet returns the expected output and whether it was explicitly provided.
+Cases created through CaseCreateWithoutExpected return (zeroValue, false).
+*/
+func CaseExpectedTryGet[TInput, TOutput any](c Case[TInput, TOutput]) (TOutput, bool) {
+	return internal.ShieldCaseExpectedTryGet(c)
 }
 
 /*

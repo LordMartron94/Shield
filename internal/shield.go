@@ -152,6 +152,10 @@ func ShieldUnitSetEvaluationGate(unit *ShieldUnit, gate ShieldUnitEvaluationGate
 }
 
 func ShieldUnitRegisterAtom[TInput, TOutput any](unit *ShieldUnit, atom ShieldAtom[TInput, TOutput]) {
+	if len(atom.cases) == 0 {
+		panic("registered atom must have at least 1 case")
+	}
+
 	unit.atoms = append(unit.atoms, atom.toAny())
 }
 
@@ -299,8 +303,9 @@ type ShieldCase[TInput, TOutput any] struct {
 	name        string
 	description *string
 
-	input    TInput
-	expected TOutput
+	input       TInput
+	expected    TOutput
+	hasExpected bool
 }
 
 func ShieldCaseCreate[TInput, TOutput any](name string, input TInput, expected TOutput) *ShieldCase[TInput, TOutput] {
@@ -309,6 +314,16 @@ func ShieldCaseCreate[TInput, TOutput any](name string, input TInput, expected T
 		description: nil,
 		input:       input,
 		expected:    expected,
+		hasExpected: true,
+	}
+}
+
+func ShieldCaseCreateWithoutExpected[TInput, TOutput any](name string, input TInput) *ShieldCase[TInput, TOutput] {
+	return &ShieldCase[TInput, TOutput]{
+		name:        name,
+		description: nil,
+		input:       input,
+		hasExpected: false,
 	}
 }
 
@@ -328,6 +343,10 @@ func ShieldCaseExpectedGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) T
 	return c.expected
 }
 
+func ShieldCaseExpectedTryGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) (TOutput, bool) {
+	return c.expected, c.hasExpected
+}
+
 func ShieldCaseDescriptionGet[TInput, TOutput any](c ShieldCase[TInput, TOutput]) *string {
 	return c.description
 }
@@ -338,6 +357,7 @@ func (s *ShieldCase[TInput, TOutput]) toAny() ShieldCase[any, any] {
 		description: s.description,
 		input:       s.input,
 		expected:    s.expected,
+		hasExpected: s.hasExpected,
 	}
 }
 
@@ -347,6 +367,7 @@ func shieldCaseToTyped[TInput, TOutput any](shieldCase ShieldCase[any, any]) Shi
 		description: shieldCase.description,
 		input:       shieldCase.input.(TInput),
 		expected:    shieldCase.expected.(TOutput),
+		hasExpected: shieldCase.hasExpected,
 	}
 }
 
@@ -391,10 +412,10 @@ func ShieldCreate(cfg ShieldConfiguration) *Shield {
 }
 
 type ShieldRunReport struct {
-	Elapsed             time.Duration
-	TopLevel            []ShieldUnitChildOutcome
-	Failed              bool
-	WrittenReportPath   string
+	Elapsed           time.Duration
+	TopLevel          []ShieldUnitChildOutcome
+	Failed            bool
+	WrittenReportPath string
 }
 
 func ShieldRun(shield *Shield, runtimeCfg *ShieldRuntimeConfiguration) ShieldRunReport {

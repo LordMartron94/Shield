@@ -31,8 +31,9 @@ Typical flow:
 
  1. ConfigurationCreate, ConfigurationRegisterUnits with units built via UnitCreate and
     UnitRegisterAtom / UnitRegisterSubUnits.
- 2. For each atom: AtomCreate(runner, validator), AtomRegisterCase for each case, optional
-    AtomSetSetupAndTeardown / AtomSetDescription.
+ 2. For each atom: AtomCreate(runner, validator), AtomRegisterCase for each case (via
+    CaseCreate or CaseCreateWithoutExpected), optional AtomSetSetupAndTeardown /
+    AtomSetDescription.
  3. Optional: UnitSetStopRemainingSubUnitsOnChildFailure / UnitSetSkipOwnAtomsWhenChildFailureStopsSubUnits /
     UnitSetEvaluationGate on units that model dependencies.
  4. EngineCreate(configuration), report := Run(engine, runtimeConfiguration); use report.Failed
