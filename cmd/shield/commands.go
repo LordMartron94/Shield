@@ -58,6 +58,12 @@ func shieldCliRegisterRunCommands() {
 			return
 		}
 
+		resolvedOutDir, err := shieldCliResultDirResolveFromBase(state.configDir, outDirRaw)
+		if err != nil {
+			fmt.Println(shieldCliColorBold("run error: failed to resolve output directory: "+err.Error(), ansiRed))
+			return
+		}
+
 		switch targetCfg.EntrypointKind {
 		case "", "harness":
 			// default in-process harness execution
@@ -71,7 +77,7 @@ func shieldCliRegisterRunCommands() {
 				fmt.Println(shieldCliColor("target:", ansiCyan), target)
 			}
 
-			if err := shieldCliRunTargetGoTestExecute(targetCfg, state.configDir); err != nil {
+			if err := shieldCliRunTargetGoTestExecute(targetCfg, state.configDir, resolvedOutDir); err != nil {
 				fmt.Println(shieldCliColorBold("run result: failed ("+err.Error()+")", ansiRed))
 				return
 			}
@@ -95,13 +101,13 @@ func shieldCliRegisterRunCommands() {
 		engine := shield.EngineCreate(*cfg)
 		runtimeCfg := shield.RuntimeConfigurationCreate(unitBlacklist, atomBlacklist)
 
-		persist := shield.ReportPersistenceCreateFromEnv(outDirRaw)
+		persist := shield.ReportPersistenceCreate(resolvedOutDir)
 		shield.ReportPersistenceSetEnabled(persist, persistEnabled)
 		shield.ReportPersistenceSetMode(persist, shieldCliPersistenceModeParse(modeRaw))
 
 		outcome := shield.RunWithReportPersistence(engine, runtimeCfg, persist)
 		state.lastResult = outcome.WrittenReportPath
-		state.resultsDir = shieldCliResultDirResolve(outDirRaw)
+		state.resultsDir = resolvedOutDir
 
 		if target != "" {
 			fmt.Println(shieldCliColor("target:", ansiCyan), target)
@@ -271,7 +277,7 @@ func shieldCliRegisterResultCommands() {
 	})
 }
 
-func shieldCliRunTargetGoTestExecute(targetCfg shieldCliResolvedRunTarget, workingDir string) error {
+func shieldCliRunTargetGoTestExecute(targetCfg shieldCliResolvedRunTarget, workingDir string, resolvedOutDir string) error {
 	goArgs := []string{"test", targetCfg.Entrypoint}
 
 	if strings.TrimSpace(targetCfg.TestRunPattern) != "" {
@@ -283,16 +289,6 @@ func shieldCliRunTargetGoTestExecute(targetCfg shieldCliResolvedRunTarget, worki
 	cmd := exec.Command("go", goArgs...)
 	cmd.Dir = workingDir
 	env := os.Environ()
-
-	defaultOutDir := shieldCliDefaultResultsDir
-	if strings.TrimSpace(targetCfg.Run.OutDir) != "" {
-		defaultOutDir = targetCfg.Run.OutDir
-	}
-
-	resolvedOutDir := defaultOutDir
-	if !filepath.IsAbs(resolvedOutDir) {
-		resolvedOutDir = filepath.Join(workingDir, resolvedOutDir)
-	}
 
 	resolvedLogDir := filepath.Join(workingDir, "logs")
 

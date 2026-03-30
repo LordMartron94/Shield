@@ -53,9 +53,10 @@ func main() {
 
 	configDir := filepath.Dir(configAbsPath)
 
-	resultsDir := config.ResultsDir
-	if envResultsDir := shieldCliResultsDirResolve(); envResultsDir != "" {
-		resultsDir = envResultsDir
+	resultsDir, err := shieldCliResultDirResolveFromBase(configDir, config.ResultsDir)
+	if err != nil {
+		fmt.Println(shieldCliColorBold("failed to resolve results directory: "+err.Error(), ansiRed))
+		os.Exit(1)
 	}
 
 	state := shieldCliState{

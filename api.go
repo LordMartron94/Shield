@@ -183,7 +183,7 @@ ReportPersistenceCreate returns persistence state for an output directory (clean
 Disabled by default; default mode is JSON. Use ReportPersistenceSetEnabled(true) to write after a run.
 */
 func ReportPersistenceCreate(outputDir string) *ReportPersistence {
-	return internal.ShieldReportPersistenceCreate(outputDir)
+	return ReportPersistenceCreateFromEnv(outputDir)
 }
 
 /*

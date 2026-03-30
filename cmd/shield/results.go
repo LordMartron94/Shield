@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"foundation/system"
 	"os"
 	"path/filepath"
 	"shield"
@@ -35,8 +36,17 @@ func shieldCliResultDirResolve(defaultDir string) string {
 	return defaultDir
 }
 
-func shieldCliResultsDirResolve() string {
-	return shieldCliResultDirResolve("")
+func shieldCliResultDirResolveFromBase(baseDir string, defaultDir string) (string, error) {
+	rawDir := shieldCliResultDirResolve(defaultDir)
+	if filepath.IsAbs(rawDir) {
+		return filepath.Clean(rawDir), nil
+	}
+
+	if strings.TrimSpace(baseDir) != "" {
+		return filepath.Clean(system.PathJoin(baseDir, rawDir)), nil
+	}
+
+	return system.PathResolveWorkspace(rawDir)
 }
 
 func shieldCliResultFilesList(resultsDir string) ([]shieldCliResultFileMeta, error) {
