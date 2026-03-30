@@ -153,6 +153,15 @@ type ReportPersistAdapter = internal.ShieldReportPersistAdapter
 ReportDocument is the shared persisted schema used by built-in writers and CLI readers.
 */
 type ReportDocument = internal.ShieldReportDocument
+type CompareOptions = internal.ShieldCompareOptions
+type CompareResult = internal.ShieldCompareResult
+type CompareVerdict = internal.ShieldCompareVerdict
+
+const (
+	CompareVerdictNoRegression = internal.ShieldCompareVerdictNoRegression
+	CompareVerdictRegression   = internal.ShieldCompareVerdictRegression
+	CompareVerdictMixed        = internal.ShieldCompareVerdictMixed
+)
 
 /*
 CLIHarnessBuilder builds a Shield configuration for the interactive Shield CLI run command.
@@ -244,6 +253,60 @@ ReportDocumentRead parses persisted JSON report documents from path.
 */
 func ReportDocumentRead(path string) (ReportDocument, error) {
 	return internal.ShieldReportDocumentRead(path)
+}
+
+/*
+CompareOptionsDefault returns baseline comparison thresholds and top-N limits.
+*/
+func CompareOptionsDefault() CompareOptions {
+	return internal.ShieldCompareOptionsDefault()
+}
+
+/*
+CompareReportDocuments compares two report documents and returns structured deltas.
+*/
+func CompareReportDocuments(baseline, candidate ReportDocument, options CompareOptions) CompareResult {
+	return internal.ShieldCompareReportDocuments(baseline, candidate, options)
+}
+
+/*
+CompareReportsFromPaths reads two JSON report files and compares them.
+*/
+func CompareReportsFromPaths(baselinePath, candidatePath string, options CompareOptions) (CompareResult, error) {
+	baseline, err := ReportDocumentRead(baselinePath)
+	if err != nil {
+		return CompareResult{}, err
+	}
+
+	candidate, err := ReportDocumentRead(candidatePath)
+	if err != nil {
+		return CompareResult{}, err
+	}
+	if baseline.SchemaVersion < 2 || candidate.SchemaVersion < 2 {
+		return CompareResult{}, fmt.Errorf(
+			"incompatible report schemas for compare (baseline=%d candidate=%d): require schema >= 2",
+			baseline.SchemaVersion, candidate.SchemaVersion)
+	}
+
+	result := internal.ShieldCompareReportDocuments(baseline, candidate, options)
+	result.BaselinePath = baselinePath
+	result.CandidatePath = candidatePath
+
+	return result, nil
+}
+
+/*
+CompareResultFormatTXT renders a comparison result as text.
+*/
+func CompareResultFormatTXT(result CompareResult) string {
+	return internal.ShieldCompareResultFormatTXT(result)
+}
+
+/*
+CompareResultHasRegression reports whether compare verdict indicates regression risk.
+*/
+func CompareResultHasRegression(result CompareResult) bool {
+	return internal.ShieldCompareResultHasRegression(result)
 }
 
 /*

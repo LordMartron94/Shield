@@ -275,6 +275,10 @@ func shieldCliRegisterResultCommands() {
 
 		fmt.Println(shieldCliColor("usage: baseline <show|set <latest|index|file>|clear>", ansiYellow))
 	})
+
+	shieldCliRegisterCommand([]string{"compare"}, "Compare reports (usage: compare [baseline] [candidate] [flags] | compare choose [flags])", func(args []string, state *shieldCliState) {
+		shieldCliCompareCommandRun(args, state)
+	})
 }
 
 func shieldCliRunTargetGoTestExecute(targetCfg shieldCliResolvedRunTarget, workingDir string, resolvedOutDir string) error {
