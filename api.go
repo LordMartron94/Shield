@@ -64,6 +64,11 @@ UnitAtomOutcome records one atom execution outcome inside UnitRunReport.Atoms.
 type UnitAtomOutcome = internal.ShieldUnitAtomOutcome
 
 /*
+AtomCaseOutcome records one case execution outcome inside UnitAtomOutcome.Cases.
+*/
+type AtomCaseOutcome = internal.ShieldAtomCaseReport
+
+/*
 UnitChildOutcome binds a direct sub-unit’s name to whether it was classified as failed and its full report.
 */
 type UnitChildOutcome = internal.ShieldUnitChildOutcome
@@ -80,6 +85,13 @@ RuntimeConfiguration selects which units and atoms to skip by exact name match.
 Blacklists only; see ADR 0001 in docs/adr.
 */
 type RuntimeConfiguration = internal.ShieldRuntimeConfiguration
+type RunVerbosity = internal.ShieldRunVerbosity
+
+const (
+	RunVerbosityQuiet   = internal.ShieldRunVerbosityQuiet
+	RunVerbosityNormal  = internal.ShieldRunVerbosityNormal
+	RunVerbosityVerbose = internal.ShieldRunVerbosityVerbose
+)
 
 /*
 Engine is the runnable graph built from a frozen Configuration.
@@ -119,6 +131,7 @@ const (
 
 /*
 RunAggregates is the counter bundle inside RunMetrics (tree-walk summary).
+Includes pass/fail/skip counts for units, atoms, and cases.
 */
 type RunAggregates = internal.ShieldRunAggregates
 
@@ -450,6 +463,13 @@ Matching is by unit name or atom name string equality.
 */
 func RuntimeConfigurationCreate(blacklistedUnits, blacklistedAtoms []string) *RuntimeConfiguration {
 	return internal.ShieldRuntimeConfigurationCreate(blacklistedUnits, blacklistedAtoms)
+}
+
+/*
+RuntimeConfigurationSetVerbosity sets console rendering verbosity for a run (quiet|normal|verbose).
+*/
+func RuntimeConfigurationSetVerbosity(cfg *RuntimeConfiguration, verbosity RunVerbosity) {
+	internal.ShieldRuntimeConfigurationSetVerbosity(cfg, verbosity)
 }
 
 /*

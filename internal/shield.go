@@ -80,6 +80,17 @@ type ShieldUnitAtomOutcome struct {
 	ValidationFailures    int
 	Panics                int
 	Elapsed               time.Duration
+	Cases                 []ShieldAtomCaseReport
+}
+
+type ShieldAtomCaseReport struct {
+	Name                   string
+	Failed                 bool
+	Skipped                bool
+	ValidationFailure      bool
+	Panic                  bool
+	SkipFurtherAtomsInUnit bool
+	Elapsed                time.Duration
 }
 
 type ShieldUnitRunReport struct {
@@ -362,6 +373,7 @@ func shieldCaseToTyped[TInput, TOutput any](shieldCase ShieldCase[any, any]) Shi
 type ShieldRuntimeConfiguration struct {
 	blacklistedUnits []string
 	blacklistedAtoms []string
+	verbosity        ShieldRunVerbosity
 
 	// Architecture decision: explicit blacklisting instead of whitelisting.
 	// See docs/adr/0001-Runtime-Configuration-Filtering.md for detail.
@@ -374,6 +386,20 @@ func ShieldRuntimeConfigurationCreate(
 	return &ShieldRuntimeConfiguration{
 		blacklistedUnits: blacklistedUnits,
 		blacklistedAtoms: blacklistedAtoms,
+		verbosity:        ShieldRunVerbosityNormal,
+	}
+}
+
+func ShieldRuntimeConfigurationSetVerbosity(cfg *ShieldRuntimeConfiguration, verbosity ShieldRunVerbosity) {
+	if cfg == nil {
+		return
+	}
+
+	switch verbosity {
+	case ShieldRunVerbosityQuiet, ShieldRunVerbosityNormal, ShieldRunVerbosityVerbose:
+		cfg.verbosity = verbosity
+	default:
+		cfg.verbosity = ShieldRunVerbosityNormal
 	}
 }
 
@@ -382,6 +408,14 @@ func ShieldRuntimeConfigurationCreate(
 type Shield struct {
 	units []ShieldUnit
 }
+
+type ShieldRunVerbosity uint8
+
+const (
+	ShieldRunVerbosityQuiet ShieldRunVerbosity = iota + 1
+	ShieldRunVerbosityNormal
+	ShieldRunVerbosityVerbose
+)
 
 func ShieldCreate(cfg ShieldConfiguration) *Shield {
 	return &Shield{
@@ -418,6 +452,10 @@ func shieldRunExecute(
 	runtimeCfg *ShieldRuntimeConfiguration,
 	persist *ShieldReportPersistence,
 ) ShieldRunOutcome {
+	if runtimeCfg == nil {
+		runtimeCfg = ShieldRuntimeConfigurationCreate(nil, nil)
+	}
+
 	sorted := extensions.SortedCopyShallow(shield.units, func(a, b ShieldUnit) int {
 		return cmp.Compare(a.order, b.order)
 	})
@@ -430,10 +468,10 @@ func shieldRunExecute(
 
 	tel := &shieldRunTelemetry{atomDurationsNs: make([]float64, 0)}
 	runIO := shieldRunIOCreateDefault(persist)
-	runIO.reporter.OnRunStart(len(sorted))
+	runIO.reporter.OnRunStart(len(sorted), runtimeCfg.verbosity)
 
 	for _, unit := range sorted {
-		unitReport := shieldUnitRun(unit, runtimeCfg, tel, runIO.reporter)
+		unitReport := shieldUnitRun(unit, runtimeCfg, tel, runIO.reporter, 0)
 		failed := shieldUnitEvaluationFailed(unit, unitReport)
 
 		report.TopLevel = append(report.TopLevel, ShieldUnitChildOutcome{
@@ -471,6 +509,7 @@ type shieldAtomRunStats struct {
 	skipRestOfUnit         bool
 	elapsed                time.Duration
 	failed                 bool
+	caseOutcomes           []ShieldAtomCaseReport
 }
 
 type shieldAtomCaseOutcome struct {
@@ -480,6 +519,7 @@ type shieldAtomCaseOutcome struct {
 	panicStage           string
 	panicMessage         string
 	validationResult     *ShieldAtomResult
+	elapsed              time.Duration
 }
 
 func shieldUnitRun(
@@ -487,6 +527,7 @@ func shieldUnitRun(
 	runtimeCfg *ShieldRuntimeConfiguration,
 	tel *shieldRunTelemetry,
 	reporter shieldRunReporter,
+	depth int,
 ) ShieldUnitRunReport {
 	report := ShieldUnitRunReport{
 		Name:  unit.name,
@@ -512,13 +553,13 @@ func shieldUnitRun(
 	atoms := shieldUnitGetSortedAtoms(unit)
 	sortedSubs := shieldUnitGetSortedSubUnits(unit)
 
-	reporter.OnUnitStart(unit.name)
+	reporter.OnUnitStart(unit, depth)
 	startUnit := time.Now()
 
 	childFailureStopped := false
 
 	for _, subUnit := range sortedSubs {
-		subReport := shieldUnitRun(subUnit, runtimeCfg, tel, reporter)
+		subReport := shieldUnitRun(subUnit, runtimeCfg, tel, reporter, depth+1)
 		subFailed := shieldUnitEvaluationFailed(subUnit, subReport)
 
 		report.DirectChildren = append(report.DirectChildren, ShieldUnitChildOutcome{
@@ -552,6 +593,7 @@ func shieldUnitRun(
 				ValidationFailures:    atomStats.validationFailures,
 				Panics:                atomStats.panics,
 				Elapsed:               atomStats.elapsed,
+				Cases:                 atomStats.caseOutcomes,
 			})
 
 			if atomStats.setupFailedBeforeCases {
@@ -575,7 +617,7 @@ func shieldUnitRun(
 	finishedUnit := time.Now()
 	elapsedUnit := finishedUnit.Sub(startUnit)
 	failed := shieldUnitEvaluationFailed(unit, report)
-	reporter.OnUnitEnd(unit.name, elapsedUnit, report, failed)
+	reporter.OnUnitEnd(unit, depth, elapsedUnit, report, failed)
 
 	return report
 }
@@ -587,7 +629,9 @@ func shieldAtomRun(
 	tel *shieldRunTelemetry,
 	reporter shieldRunReporter,
 ) shieldAtomRunStats {
-	stats := shieldAtomRunStats{}
+	stats := shieldAtomRunStats{
+		caseOutcomes: make([]ShieldAtomCaseReport, 0, len(atom.cases)),
+	}
 
 	if success := runSetup("atom", atom.name, atom.setup, reporter); !success {
 		reporter.OnSkip("atom", atom.name, "setup_failed")
@@ -606,29 +650,44 @@ func shieldAtomRun(
 		return stats
 	}
 
-	reporter.OnAtomStart(unitName, atom.name)
+	reporter.OnAtomStart(unitName, atom, len(atom.cases))
 
 	startAtom := time.Now()
 	atomFailed := false
 
 	for _, shieldCase := range atom.cases {
-		reporter.OnCaseStart(unitName, atom.name, shieldCase.name)
+		reporter.OnCaseStart(unitName, atom.name, shieldCase)
+		caseStarted := time.Now()
 
 		outcome := atomEvaluateCase(unitName, atom, shieldCase, reporter)
+		caseElapsed := time.Since(caseStarted)
+		outcome.elapsed = caseElapsed
 
 		if outcome.hadValidationFailure {
 			stats.validationFailures++
 			atomFailed = true
 			if outcome.validationResult != nil {
-				reporter.OnValidationFailed(unitName, atom.name, shieldCase.name, *outcome.validationResult)
+				reporter.OnValidationFailed(unitName, atom.name, shieldCase.name, *outcome.validationResult, runtimeCfg.verbosity)
 			}
 		}
 
 		if outcome.hadPanic {
 			stats.panics++
 			atomFailed = true
-			reporter.OnCasePanic(unitName, atom.name, shieldCase.name, outcome.panicStage, outcome.panicMessage)
+			reporter.OnCasePanic(unitName, atom.name, shieldCase.name, outcome.panicStage, outcome.panicMessage, runtimeCfg.verbosity)
 		}
+
+		caseFailed := outcome.hadValidationFailure || outcome.hadPanic
+		reporter.OnCaseEnd(unitName, atom.name, shieldCase, caseFailed, false, caseElapsed)
+		stats.caseOutcomes = append(stats.caseOutcomes, ShieldAtomCaseReport{
+			Name:                   shieldCase.name,
+			Failed:                 caseFailed,
+			Skipped:                false,
+			ValidationFailure:      outcome.hadValidationFailure,
+			Panic:                  outcome.hadPanic,
+			SkipFurtherAtomsInUnit: outcome.skipRestOfUnit,
+			Elapsed:                caseElapsed,
+		})
 
 		if outcome.skipRestOfUnit {
 			stats.skipRestOfUnit = true

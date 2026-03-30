@@ -23,9 +23,18 @@ type ShieldRunAggregates struct {
 	UnitsVisited            int
 	UnitsSkippedBlacklist   int
 	UnitsSkippedSetup       int
+	UnitsPassed             int
+	UnitsFailed             int
+	UnitsSkipped            int
 	AtomValidationFailures  int
 	AtomPanics              int
 	AtomSetupFailures       int
+	AtomsPassed             int
+	AtomsFailed             int
+	AtomsSkipped            int
+	CasesPassed             int
+	CasesFailed             int
+	CasesSkipped            int
 	SubUnitLoopEarlyStops   int
 	UnitsFailedGate         int
 }
@@ -60,27 +69,33 @@ func shieldRunReportAggregate(report ShieldRunReport) ShieldRunAggregates {
 	var a ShieldRunAggregates
 
 	for _, tl := range report.TopLevel {
-		shieldAggregatesAddUnitReport(&a, tl.Report)
-
-		if tl.Failed {
-			a.UnitsFailedGate++
-		}
+		shieldAggregatesAddUnitReport(&a, tl.Report, tl.Failed)
 	}
 
 	return a
 }
 
-func shieldAggregatesAddUnitReport(a *ShieldRunAggregates, r ShieldUnitRunReport) {
+func shieldAggregatesAddUnitReport(a *ShieldRunAggregates, r ShieldUnitRunReport, unitFailed bool) {
 	a.UnitsVisited++
+	if unitFailed {
+		a.UnitsFailed++
+		a.UnitsFailedGate++
+	} else {
+		a.UnitsPassed++
+	}
 
 	if r.SkippedDueToBlacklist {
 		a.UnitsSkippedBlacklist++
+		a.UnitsSkipped++
+		a.UnitsPassed--
 
 		return
 	}
 
 	if r.SkippedDueToSetup {
 		a.UnitsSkippedSetup++
+		a.UnitsSkipped++
+		a.UnitsFailed--
 
 		return
 	}
@@ -93,12 +108,28 @@ func shieldAggregatesAddUnitReport(a *ShieldRunAggregates, r ShieldUnitRunReport
 		a.SubUnitLoopEarlyStops++
 	}
 
-	for _, ch := range r.DirectChildren {
-		if ch.Failed {
-			a.UnitsFailedGate++
+	for _, atom := range r.Atoms {
+		if atom.SkippedDueToBlacklist || atom.SkippedDueToSetup {
+			a.AtomsSkipped++
+		} else if atom.Failed {
+			a.AtomsFailed++
+		} else {
+			a.AtomsPassed++
 		}
 
-		shieldAggregatesAddUnitReport(a, ch.Report)
+		for _, c := range atom.Cases {
+			if c.Skipped {
+				a.CasesSkipped++
+			} else if c.Failed {
+				a.CasesFailed++
+			} else {
+				a.CasesPassed++
+			}
+		}
+	}
+
+	for _, ch := range r.DirectChildren {
+		shieldAggregatesAddUnitReport(a, ch.Report, ch.Failed)
 	}
 }
 

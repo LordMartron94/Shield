@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const shieldReportSchemaVersion = 2
+const shieldReportSchemaVersion = 3
 
 // ShieldReportDocumentSchemaVersion is exported for clients documenting persisted JSON.
 const ShieldReportDocumentSchemaVersion = shieldReportSchemaVersion
@@ -102,9 +102,18 @@ type ShieldReportSummary struct {
 	UnitsVisited           int                          `json:"units_visited"`
 	UnitsSkippedBlacklist  int                          `json:"units_skipped_blacklist"`
 	UnitsSkippedSetup      int                          `json:"units_skipped_setup"`
+	UnitsPassed            int                          `json:"units_passed"`
+	UnitsFailed            int                          `json:"units_failed"`
+	UnitsSkipped           int                          `json:"units_skipped"`
 	AtomValidationFailures int                          `json:"atom_validation_failures"`
 	AtomPanics             int                          `json:"atom_panics"`
 	AtomSetupFailures      int                          `json:"atom_setup_failures"`
+	AtomsPassed            int                          `json:"atoms_passed"`
+	AtomsFailed            int                          `json:"atoms_failed"`
+	AtomsSkipped           int                          `json:"atoms_skipped"`
+	CasesPassed            int                          `json:"cases_passed"`
+	CasesFailed            int                          `json:"cases_failed"`
+	CasesSkipped           int                          `json:"cases_skipped"`
 	SubUnitLoopEarlyStops  int                          `json:"subunit_loop_early_stops"`
 	UnitsFailedGate        int                          `json:"units_failed_gate"`
 	Duration               *ShieldReportDurationSummary `json:"duration,omitempty"`
@@ -131,6 +140,18 @@ type ShieldReportAtomNode struct {
 	Panics                int    `json:"panics"`
 	ElapsedNs             int64  `json:"elapsed_ns"`
 	ElapsedHuman          string `json:"elapsed_human"`
+	Cases                 []ShieldReportCaseNode `json:"cases"`
+}
+
+type ShieldReportCaseNode struct {
+	Name                   string `json:"name"`
+	Failed                 bool   `json:"failed"`
+	Skipped                bool   `json:"skipped"`
+	ValidationFailure      bool   `json:"validation_failure"`
+	Panic                  bool   `json:"panic"`
+	SkipFurtherAtomsInUnit bool   `json:"skip_further_atoms_in_unit"`
+	ElapsedNs              int64  `json:"elapsed_ns"`
+	ElapsedHuman           string `json:"elapsed_human"`
 }
 
 type ShieldReportChildNode struct {
@@ -170,7 +191,7 @@ func shieldReportUnitReportMapFromRun(r ShieldUnitRunReport) ShieldReportUnitRep
 
 	for _, atom := range r.Atoms {
 		elapsedNs := atom.Elapsed.Nanoseconds()
-		out.Atoms = append(out.Atoms, ShieldReportAtomNode{
+		atomOut := ShieldReportAtomNode{
 			Name:                  atom.Name,
 			Failed:                atom.Failed,
 			SkippedDueToBlacklist: atom.SkippedDueToBlacklist,
@@ -179,7 +200,22 @@ func shieldReportUnitReportMapFromRun(r ShieldUnitRunReport) ShieldReportUnitRep
 			Panics:                atom.Panics,
 			ElapsedNs:             elapsedNs,
 			ElapsedHuman:          formatting.FormatDurationNSF64(float64(elapsedNs)),
-		})
+			Cases:                 make([]ShieldReportCaseNode, 0, len(atom.Cases)),
+		}
+		for _, c := range atom.Cases {
+			caseElapsedNs := c.Elapsed.Nanoseconds()
+			atomOut.Cases = append(atomOut.Cases, ShieldReportCaseNode{
+				Name:                   c.Name,
+				Failed:                 c.Failed,
+				Skipped:                c.Skipped,
+				ValidationFailure:      c.ValidationFailure,
+				Panic:                  c.Panic,
+				SkipFurtherAtomsInUnit: c.SkipFurtherAtomsInUnit,
+				ElapsedNs:              caseElapsedNs,
+				ElapsedHuman:           formatting.FormatDurationNSF64(float64(caseElapsedNs)),
+			})
+		}
+		out.Atoms = append(out.Atoms, atomOut)
 	}
 
 	for _, ch := range r.DirectChildren {
@@ -204,9 +240,18 @@ func ShieldReportDocumentMapFromRun(report ShieldRunReport, metrics ShieldRunMet
 			UnitsVisited:           metrics.Aggregates.UnitsVisited,
 			UnitsSkippedBlacklist:  metrics.Aggregates.UnitsSkippedBlacklist,
 			UnitsSkippedSetup:      metrics.Aggregates.UnitsSkippedSetup,
+			UnitsPassed:            metrics.Aggregates.UnitsPassed,
+			UnitsFailed:            metrics.Aggregates.UnitsFailed,
+			UnitsSkipped:           metrics.Aggregates.UnitsSkipped,
 			AtomValidationFailures: metrics.Aggregates.AtomValidationFailures,
 			AtomPanics:             metrics.Aggregates.AtomPanics,
 			AtomSetupFailures:      metrics.Aggregates.AtomSetupFailures,
+			AtomsPassed:            metrics.Aggregates.AtomsPassed,
+			AtomsFailed:            metrics.Aggregates.AtomsFailed,
+			AtomsSkipped:           metrics.Aggregates.AtomsSkipped,
+			CasesPassed:            metrics.Aggregates.CasesPassed,
+			CasesFailed:            metrics.Aggregates.CasesFailed,
+			CasesSkipped:           metrics.Aggregates.CasesSkipped,
 			SubUnitLoopEarlyStops:  metrics.Aggregates.SubUnitLoopEarlyStops,
 			UnitsFailedGate:        metrics.Aggregates.UnitsFailedGate,
 		},
@@ -451,14 +496,30 @@ func shieldReportWriteTXTVerdictBlock(b *strings.Builder, doc ShieldReportDocume
 
 func shieldReportWriteTXTSummary(b *strings.Builder, s ShieldReportSummary) {
 	fmt.Fprintf(b, "Summary\n")
-	fmt.Fprintf(b, "  Units visited: %d\n", s.UnitsVisited)
-	fmt.Fprintf(b, "  Units skipped (blacklist): %d\n", s.UnitsSkippedBlacklist)
-	fmt.Fprintf(b, "  Units skipped (setup): %d\n", s.UnitsSkippedSetup)
-	fmt.Fprintf(b, "  Atom validation failures: %d\n", s.AtomValidationFailures)
-	fmt.Fprintf(b, "  Atom panics: %d\n", s.AtomPanics)
-	fmt.Fprintf(b, "  Atom setup failures: %d\n", s.AtomSetupFailures)
-	fmt.Fprintf(b, "  Sub-unit loop early stops: %d\n", s.SubUnitLoopEarlyStops)
-	fmt.Fprintf(b, "  Units failed (gate): %d\n", s.UnitsFailedGate)
+	fmt.Fprintf(b, "  Units  : passed=%d failed=%d skipped=%d visited=%d\n", s.UnitsPassed, s.UnitsFailed, s.UnitsSkipped, s.UnitsVisited)
+	fmt.Fprintf(b, "  Atoms  : passed=%d failed=%d skipped=%d\n", s.AtomsPassed, s.AtomsFailed, s.AtomsSkipped)
+	fmt.Fprintf(b, "  Cases  : passed=%d failed=%d skipped=%d\n", s.CasesPassed, s.CasesFailed, s.CasesSkipped)
+	if s.UnitsSkippedBlacklist > 0 {
+		fmt.Fprintf(b, "  Unit skips (blacklist): %d\n", s.UnitsSkippedBlacklist)
+	}
+	if s.UnitsSkippedSetup > 0 {
+		fmt.Fprintf(b, "  Unit skips (setup): %d\n", s.UnitsSkippedSetup)
+	}
+	if s.AtomValidationFailures > 0 {
+		fmt.Fprintf(b, "  Atom validation failures: %d\n", s.AtomValidationFailures)
+	}
+	if s.AtomPanics > 0 {
+		fmt.Fprintf(b, "  Atom panics: %d\n", s.AtomPanics)
+	}
+	if s.AtomSetupFailures > 0 {
+		fmt.Fprintf(b, "  Atom setup failures: %d\n", s.AtomSetupFailures)
+	}
+	if s.SubUnitLoopEarlyStops > 0 {
+		fmt.Fprintf(b, "  Sub-unit loop early stops: %d\n", s.SubUnitLoopEarlyStops)
+	}
+	if s.UnitsFailedGate > 0 {
+		fmt.Fprintf(b, "  Units failed (gate): %d\n", s.UnitsFailedGate)
+	}
 }
 
 func shieldReportWriteTXTDuration(b *strings.Builder, d *ShieldReportDurationSummary) {
@@ -493,17 +554,7 @@ func shieldReportWriteTXTDurationStatsOK(b *strings.Builder, d *ShieldReportDura
 }
 
 func shieldReportWriteTXTTree(b *strings.Builder, tree []ShieldReportTopNode) {
-	b.WriteString("\nTop-level outcomes\n")
-	for _, top := range tree {
-		status := "PASSED"
-		if top.Failed {
-			status = "FAILED"
-		}
-
-		fmt.Fprintf(b, "  - %s: %s\n", top.Name, status)
-	}
-
-	b.WriteString("\nUnit tree (includes atom rows)\n")
+	b.WriteString("\nUnit tree\n")
 	for _, top := range tree {
 		shieldReportWriteTXTUnit(b, top.Name, top.Failed, top.Report, 0)
 	}
@@ -523,10 +574,23 @@ func shieldReportWriteTXTUnit(b *strings.Builder, name string, failed bool, r Sh
 		skipState = "setup"
 	}
 
-	fmt.Fprintf(b, "%s- %s (status=%s)\n", ind, name, status)
-	fmt.Fprintf(b, "%s  skip=%s atom_val_fail=%d atom_panic=%d atom_setup_fail=%d subunit_early=%v\n",
-		ind, skipState, r.AtomValidationFailures, r.AtomPanics,
-		r.AtomSetupFailureCount, r.TerminatedSubUnitLoopEarly)
+	fmt.Fprintf(b, "%s- unit %-24s status=%-7s skip=%s\n", ind, name, status, skipState)
+	if r.AtomValidationFailures > 0 || r.AtomPanics > 0 || r.AtomSetupFailureCount > 0 || r.TerminatedSubUnitLoopEarly {
+		fmt.Fprintf(b, "%s  diagnostics: ", ind)
+		if r.AtomValidationFailures > 0 {
+			fmt.Fprintf(b, "val_fail=%d ", r.AtomValidationFailures)
+		}
+		if r.AtomPanics > 0 {
+			fmt.Fprintf(b, "panic=%d ", r.AtomPanics)
+		}
+		if r.AtomSetupFailureCount > 0 {
+			fmt.Fprintf(b, "setup_fail=%d ", r.AtomSetupFailureCount)
+		}
+		if r.TerminatedSubUnitLoopEarly {
+			fmt.Fprintf(b, "subunit_early=true")
+		}
+		b.WriteString("\n")
+	}
 
 	for _, atom := range r.Atoms {
 		atomStatus := "PASSED"
@@ -541,9 +605,30 @@ func shieldReportWriteTXTUnit(b *strings.Builder, name string, failed bool, r Sh
 			atomSkip = "setup"
 		}
 
-		fmt.Fprintf(b, "%s  * atom %s (status=%s)\n", ind, atom.Name, atomStatus)
-		fmt.Fprintf(b, "%s    skip=%s val_fail=%d panic=%d elapsed=%s (%d ns)\n",
-			ind, atomSkip, atom.ValidationFailures, atom.Panics, atom.ElapsedHuman, atom.ElapsedNs)
+		fmt.Fprintf(b, "%s  * atom %-24s status=%-7s skip=%-9s elapsed=%s\n",
+			ind, atom.Name, atomStatus, atomSkip, atom.ElapsedHuman)
+		if atom.ValidationFailures > 0 || atom.Panics > 0 {
+			fmt.Fprintf(b, "%s    diagnostics: ", ind)
+			if atom.ValidationFailures > 0 {
+				fmt.Fprintf(b, "val_fail=%d ", atom.ValidationFailures)
+			}
+			if atom.Panics > 0 {
+				fmt.Fprintf(b, "panic=%d", atom.Panics)
+			}
+			b.WriteString("\n")
+		}
+		for _, c := range atom.Cases {
+			caseStatus := "PASSED"
+			if c.Failed {
+				caseStatus = "FAILED"
+			}
+			caseSkip := "none"
+			if c.Skipped {
+				caseSkip = "skipped"
+			}
+			fmt.Fprintf(b, "%s    - case %-22s status=%-7s skip=%-7s elapsed=%s\n",
+				ind, c.Name, caseStatus, caseSkip, c.ElapsedHuman)
+		}
 	}
 
 	for _, ch := range r.DirectChildren {
