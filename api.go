@@ -27,15 +27,21 @@ return *AtomResultFailureCreate("reason").
 type Validator[TInput, TOutput any] = internal.ShieldValidator[TInput, TOutput]
 
 /*
+CaseEvaluation is a case-level validation function variant. Cases created through
+CaseCreateWithEvaluation use this function instead of the atom validator.
+*/
+type CaseEvaluation[TInput, TOutput any] = internal.ShieldValidator[TInput, TOutput]
+
+/*
 Atom is one ordered check within a unit: a runner, a validator, and registered cases.
 */
 type Atom[TInput, TOutput any] = internal.ShieldAtom[TInput, TOutput]
 
 /*
 Case binds a name and input for one invocation of an atom’s runner, and may optionally
-carry an expected output when the validation strategy needs one.
+carry an expected output or a case-level evaluation function.
 Read fields in validators via CaseNameGet, CaseInputGet, CaseExpectedGet/CaseExpectedTryGet,
-and CaseDescriptionGet.
+CaseEvaluationTryGet, and CaseDescriptionGet.
 */
 type Case[TInput, TOutput any] = internal.ShieldCase[TInput, TOutput]
 
@@ -478,6 +484,18 @@ func CaseCreateWithoutExpected[TInput, TOutput any](name string, input TInput) *
 }
 
 /*
+CaseCreateWithEvaluation builds a named case from input and a case-level evaluation function.
+When provided, this evaluation function runs instead of the atom validator for this case.
+*/
+func CaseCreateWithEvaluation[TInput, TOutput any](
+	name string,
+	input TInput,
+	evaluation CaseEvaluation[TInput, TOutput],
+) *Case[TInput, TOutput] {
+	return internal.ShieldCaseCreateWithEvaluation(name, input, evaluation)
+}
+
+/*
 CaseSetDescription sets optional human-readable text included in log labels.
 */
 func CaseSetDescription[TInput, TOutput any](c *Case[TInput, TOutput], description string) {
@@ -511,6 +529,14 @@ Cases created through CaseCreateWithoutExpected return (zeroValue, false).
 */
 func CaseExpectedTryGet[TInput, TOutput any](c Case[TInput, TOutput]) (TOutput, bool) {
 	return internal.ShieldCaseExpectedTryGet(c)
+}
+
+/*
+CaseEvaluationTryGet returns the case-level evaluation function and whether it was explicitly provided.
+Cases created through CaseCreateWithEvaluation return (fn, true).
+*/
+func CaseEvaluationTryGet[TInput, TOutput any](c Case[TInput, TOutput]) (CaseEvaluation[TInput, TOutput], bool) {
+	return internal.ShieldCaseEvaluationTryGet(c)
 }
 
 /*
