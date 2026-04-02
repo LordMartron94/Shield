@@ -294,10 +294,7 @@ func shieldCliRunTargetGoTestExecute(targetCfg shieldCliResolvedRunTarget, worki
 	cmd.Dir = workingDir
 	env := os.Environ()
 
-	resolvedLogDir := filepath.Join(workingDir, "logs")
-
 	env = append(env, "SHIELD_RESULTS_DIR="+resolvedOutDir)
-	env = append(env, "RULEFORGE_LOG_DIR="+resolvedLogDir)
 	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
