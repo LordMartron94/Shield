@@ -33,17 +33,29 @@ func TestShield(t *testing.T) {
 
 func buildSumScenario() shield.SHIELD_Testing_Scenario[[]int, int] {
 	guards := make([]shield.SHIELD_Testing_Guard[[]int, int], 1)
-	guards[0] = shield.SHIELD_Testing_GuardCreateDefault("sum_works", []int{1, 4, 6}, 11)
+	guards[0] = shield.SHIELD_Testing_GuardCreate(
+		"sum_works",
+		[]int{1, 4, 6},
+		shield.SHIELD_Testing_GuardPolicyMustEqual(
+			func(a, b int) bool {
+				return a == b
+			},
+			func(item int) string {
+				return fmt.Sprintf("%d", item)
+			},
+			11,
+		),
+	)
 
 	return shield.SHIELD_Testing_ScenarioCreate(
 		"test_scenario",
 		guards,
-		func(a, b int) bool { return a == b },
 		func(input []int) (int, error) {
 			counter := 0
 			for _, v := range input {
 				counter += v
 			}
+
 			return counter, nil
 		},
 	)

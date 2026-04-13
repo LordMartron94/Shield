@@ -2,81 +2,242 @@ package internal
 
 import (
 	"fmt"
+	"sort"
 	"time"
 )
 
+// --------------------------------------------------------------- GUARD POLICY
+
+type PolicyFlag uint32
+
+const (
+	FlagExpectsPanic PolicyFlag = 1 << iota
+	FlagExpectsNoPanic
+	FlagExpectsError
+	FlagExpectsNoError
+	FlagEvaluatesOutput
+)
+
+func executionPhase(flags PolicyFlag) int {
+	if flags&(FlagExpectsPanic|FlagExpectsNoPanic) != 0 {
+		return 1
+	}
+	if flags&(FlagExpectsError|FlagExpectsNoError) != 0 {
+		return 2
+	}
+	return 3
+}
+
+type GuardPolicy[TOutput any] struct {
+	flags    PolicyFlag
+	evaluate func(result executionResult[TOutput]) (passed bool, reason string)
+}
+
+func GuardPolicyMustNotPanic[TOutput any]() GuardPolicy[TOutput] {
+	return GuardPolicy[TOutput]{
+		flags: FlagExpectsNoPanic,
+		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
+			if result.panicked {
+				return false, fmt.Sprintf("unexpected panic occurred: %s", result.panicMessage)
+			}
+
+			return true, ""
+		},
+	}
+}
+
+func GuardPolicyMustPanic[TOutput any]() GuardPolicy[TOutput] {
+	return GuardPolicy[TOutput]{
+		flags: FlagExpectsPanic,
+		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
+			if !result.panicked {
+				return false, "expected panic, but none occurred"
+			}
+
+			return true, ""
+		},
+	}
+}
+
+func GuardPolicyMustNotError[TOutput any]() GuardPolicy[TOutput] {
+	return GuardPolicy[TOutput]{
+		flags: FlagExpectsNoError,
+		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
+			if result.executionError != nil {
+				return false, fmt.Sprintf("unexpected error occurred: %s", result.executionError.Error())
+			}
+
+			return true, ""
+		},
+	}
+}
+
+func GuardPolicyMustError[TOutput any]() GuardPolicy[TOutput] {
+	return GuardPolicy[TOutput]{
+		flags: FlagExpectsError,
+		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
+			if result.executionError == nil {
+				return false, "expected error, but none occurred"
+			}
+
+			return true, ""
+		},
+	}
+}
+
+func GuardPolicyMustNotEqual[TOutput any](
+	comparator func(a, b TOutput) bool,
+	formatter func(output TOutput) string,
+	notExpected TOutput,
+) GuardPolicy[TOutput] {
+	return GuardPolicy[TOutput]{
+		flags: FlagEvaluatesOutput,
+		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
+			if comparator(result.actual, notExpected) {
+				return false, fmt.Sprintf(
+					"output must not be %s",
+					formatter(notExpected),
+				)
+			}
+
+			return true, ""
+		},
+	}
+}
+
+func GuardPolicyMustEqual[TOutput any](
+	comparator func(a, b TOutput) bool,
+	formatter func(output TOutput) string,
+	expected TOutput,
+) GuardPolicy[TOutput] {
+	return GuardPolicy[TOutput]{
+		flags: FlagEvaluatesOutput,
+		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
+			if !comparator(result.actual, expected) {
+				return false, fmt.Sprintf(
+					"expected %s, got %s",
+					formatter(expected),
+					formatter(result.actual),
+				)
+			}
+
+			return true, ""
+		},
+	}
+}
+
+func GuardPolicyPredicate[TOutput any](
+	predicate func(actual TOutput) (passed bool, reason string),
+) GuardPolicy[TOutput] {
+	return GuardPolicy[TOutput]{
+		flags: FlagEvaluatesOutput,
+		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
+			return predicate(result.actual)
+		},
+	}
+}
+
 // --------------------------------------------------------------- GUARDS
 
-type GuardOptions struct {
-	mustPanic bool
-	mustError bool
+type executionResult[TOutput any] struct {
+	actual         TOutput
+	executionError error
+
+	panicked     bool
+	panicMessage string
 }
 
 type Guard[TInput, TOutput any] struct {
 	name string
 
-	input          TInput
-	expectedOutput TOutput
-
-	options GuardOptions
+	input    TInput
+	policies []GuardPolicy[TOutput]
 }
 
-func GuardCreateDefault[TInput, TOutput any](
+func GuardCreate[TInput, TOutput any](
 	name string,
 	input TInput,
-	expectedOutput TOutput,
+	policies ...GuardPolicy[TOutput],
 ) Guard[TInput, TOutput] {
+
+	if len(policies) == 0 {
+		return injectPoisonPill[TInput, TOutput](name, input, "0 policies provided")
+	}
+
+	var totalFlags PolicyFlag
+	outputPolicyCount := 0
+
+	for _, p := range policies {
+		if p.flags&FlagEvaluatesOutput != 0 {
+			outputPolicyCount++
+		}
+		totalFlags |= p.flags
+	}
+
+	if (totalFlags&FlagExpectsPanic != 0) && (totalFlags&FlagExpectsNoPanic != 0) {
+		return injectPoisonPill[TInput, TOutput](name, input, "Conflicting policies: MustPanic and MustNotPanic combined")
+	}
+	if (totalFlags&FlagExpectsError != 0) && (totalFlags&FlagExpectsNoError != 0) {
+		return injectPoisonPill[TInput, TOutput](name, input, "Conflicting policies: MustError and MustNotError combined")
+	}
+	if outputPolicyCount > 1 {
+		return injectPoisonPill[TInput, TOutput](name, input, "Conflicting policies: Multiple output evaluations provided")
+	}
+
+	if (totalFlags&FlagExpectsPanic != 0) && (totalFlags&FlagEvaluatesOutput != 0) {
+		return injectPoisonPill[TInput, TOutput](name, input, "Logical error: Cannot evaluate output of a guard expected to panic")
+	}
+	if (totalFlags&FlagExpectsError != 0) && (totalFlags&FlagEvaluatesOutput != 0) {
+		return injectPoisonPill[TInput, TOutput](name, input, "Logical error: Cannot evaluate output of a guard expected to error")
+	}
+
+	if totalFlags&(FlagExpectsPanic|FlagExpectsNoPanic) == 0 {
+		policies = append(policies, GuardPolicyMustNotPanic[TOutput]())
+	}
+	if totalFlags&(FlagExpectsError|FlagExpectsNoError) == 0 && (totalFlags&FlagExpectsPanic == 0) {
+		policies = append(policies, GuardPolicyMustNotError[TOutput]())
+	}
+
+	sort.SliceStable(policies, func(i, j int) bool {
+		weightI := executionPhase(policies[i].flags)
+		weightJ := executionPhase(policies[j].flags)
+		return weightI < weightJ
+	})
+
 	return Guard[TInput, TOutput]{
-		name:           name,
-		input:          input,
-		expectedOutput: expectedOutput,
-		options:        GuardOptions{},
+		name:     name,
+		input:    input,
+		policies: policies,
 	}
 }
 
-func GuardCreateMustPanic[TInput, TOutput any](
+func injectPoisonPill[TInput, TOutput any](
 	name string,
 	input TInput,
+	reason string,
 ) Guard[TInput, TOutput] {
-	var zero TOutput
-
-	return Guard[TInput, TOutput]{
-		name:           name,
-		input:          input,
-		expectedOutput: zero,
-		options: GuardOptions{
-			mustPanic: true,
+	poisonPolicy := GuardPolicy[TOutput]{
+		flags: 0,
+		evaluate: func(_ executionResult[TOutput]) (bool, string) {
+			return false, fmt.Sprintf("FRAMEWORK ERROR: %s", reason)
 		},
 	}
-}
-
-func GuardCreateMustError[TInput, TOutput any](
-	name string,
-	input TInput,
-) Guard[TInput, TOutput] {
-	var zero TOutput
 
 	return Guard[TInput, TOutput]{
-		name:           name,
-		input:          input,
-		expectedOutput: zero,
-		options: GuardOptions{
-			mustError: true,
-		},
+		name:     name,
+		input:    input,
+		policies: []GuardPolicy[TOutput]{poisonPolicy},
 	}
 }
 
 // --------------------------------------------------------------- SCENARIO
-
-type Comparator[TSubject any] func(a, b TSubject) bool
 
 type Executor[TInput, TOutput any] func(input TInput) (output TOutput, error error)
 
 type Scenario[TInput, TOutput any] struct {
 	name string
 
-	guards     []Guard[TInput, TOutput]
-	comparator Comparator[TOutput]
+	guards []Guard[TInput, TOutput]
 
 	executor Executor[TInput, TOutput]
 }
@@ -84,14 +245,12 @@ type Scenario[TInput, TOutput any] struct {
 func ScenarioCreate[TInput, TOutput any](
 	name string,
 	guards []Guard[TInput, TOutput],
-	comparator Comparator[TOutput],
 	executor Executor[TInput, TOutput],
 ) Scenario[TInput, TOutput] {
 	return Scenario[TInput, TOutput]{
-		name:       name,
-		guards:     guards,
-		comparator: comparator,
-		executor:   executor,
+		name:     name,
+		guards:   guards,
+		executor: executor,
 	}
 }
 
@@ -199,7 +358,7 @@ func ScenarioRun[TInput, TOutput any](
 
 	for i := 0; i < guardAmount; i++ {
 		guard := scenario.guards[i]
-		guardResult := evaluateGuard(guard, scenario.comparator, scenario.executor)
+		guardResult := evaluateGuard(guard, scenario.executor)
 		result.guardResults[i] = guardResult
 
 		if !guardResult.passed {
@@ -222,14 +381,23 @@ func ScenarioRun[TInput, TOutput any](
 
 func evaluateGuard[TInput, TOutput any](
 	guard Guard[TInput, TOutput],
-	comparator Comparator[TOutput],
 	executor Executor[TInput, TOutput],
 ) (result GuardEvaluationResult) {
+	executionResult := executionResult[TOutput]{}
+
 	defer func() {
 		if r := recover(); r != nil {
-			if !guard.options.mustPanic {
+			executionResult.panicked = true
+			executionResult.panicMessage = fmt.Sprintf("%v", r)
+		}
+
+		for i := 0; i < len(guard.policies); i++ {
+			passed, reason := guard.policies[i].evaluate(executionResult)
+
+			if !passed {
 				result.passed = false
-				result.failureReason = fmt.Sprintf("unexpected panic: %v", r)
+				result.failureReason = reason
+				break
 			}
 		}
 	}()
@@ -242,20 +410,8 @@ func evaluateGuard[TInput, TOutput any](
 	end := time.Now()
 	result.duration = end.Sub(start)
 
-	if guard.options.mustError {
-		if err == nil {
-			result.passed = false
-			result.failureReason = "expected error, got none"
-		}
-	}
-
-	if !guard.options.mustPanic { // we must check for this, because if mustPanic is true, then TOutput is zero value
-		equal := comparator(output, guard.expectedOutput)
-		if !equal {
-			result.passed = false
-			result.failureReason = "output shape does not match expected shape"
-		}
-	}
+	executionResult.actual = output
+	executionResult.executionError = err
 
 	return result
 }
