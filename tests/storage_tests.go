@@ -29,27 +29,15 @@ func TestShieldStoragePublicAPI(t *testing.T) {
 	}
 
 	storedScenario := storedScenarios[0]
-	if storedScenario.ScenarioName != runResult.Name() {
-		t.Fatalf("expected scenario name %s, got %s", runResult.Name(), storedScenario.ScenarioName)
+	if storedScenario.Name() != runResult.Name() {
+		t.Fatalf("expected scenario name %s, got %s", runResult.Name(), storedScenario.Name())
 	}
 
-	guards, err := shield.SHIELD_Testing_Storage_GuardsFindByScenarioID(storage, storedScenario.ResultID)
-	if err != nil {
-		t.Fatalf("expected guard query to succeed, got error: %v", err)
+	if len(storedScenario.GuardResults()) != len(runResult.GuardResults()) {
+		t.Fatalf("expected %d guards, got %d", len(runResult.GuardResults()), len(storedScenario.GuardResults()))
 	}
-	if len(guards) != len(runResult.GuardResults()) {
-		t.Fatalf("expected %d guards, got %d", len(runResult.GuardResults()), len(guards))
-	}
-
-	roundTrippedResult, err := shield.SHIELD_Testing_Storage_ScenarioResultFindByID(storage, storedScenario.ResultID)
-	if err != nil {
-		t.Fatalf("expected query by id to succeed, got error: %v", err)
-	}
-	if roundTrippedResult.Name() != runResult.Name() {
-		t.Fatalf("expected round-tripped scenario name %s, got %s", runResult.Name(), roundTrippedResult.Name())
-	}
-	if !roundTrippedResult.Passed() {
-		t.Fatal("expected round-tripped scenario to pass")
+	if !storedScenario.Passed() {
+		t.Fatal("expected stored scenario to pass")
 	}
 
 	if _, err := os.Stat(dbPath); err != nil {

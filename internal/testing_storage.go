@@ -39,7 +39,7 @@ const (
 
 // --------------------------------------------------------------- ENTITIES
 
-type TestResultEntity struct {
+type testResultEntity struct {
 	ResultID       string
 	ScenarioName   string
 	Timestamp      int64 // Unix milliseconds
@@ -54,7 +54,7 @@ type TestResultEntity struct {
 	ProviderID     string
 }
 
-type GuardResultEntity struct {
+type guardResultEntity struct {
 	GuardResultID   string
 	TestResultID    string
 	GuardName       string
@@ -121,97 +121,97 @@ func testResultDatabaseEnsureOpen(db *TestResultDatabase) error {
 	return nil
 }
 
-func createTestResultsTableDef() persistence.SQLite3TableConfiguration[TestResultEntity] {
+func createTestResultsTableDef() persistence.SQLite3TableConfiguration[testResultEntity] {
 	return persistence.SQLite3TableConfigurationCreate(
 		testResultsTableName,
 		persistence.SQLite3SchemaFieldCreateManual(
 			colScenarioID, persistence.SQLiteDataTypeText,
-			func(t *TestResultEntity) any { return t.ResultID },
-			func(t *TestResultEntity) any { return &t.ResultID },
+			func(t *testResultEntity) any { return t.ResultID },
+			func(t *testResultEntity) any { return &t.ResultID },
 			persistence.SQLite3SchemaFieldOptionsPrimaryKey(),
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colScenarioName, persistence.SQLiteDataTypeText,
-			func(t *TestResultEntity) any { return t.ScenarioName },
-			func(t *TestResultEntity) any { return &t.ScenarioName },
+			func(t *testResultEntity) any { return t.ScenarioName },
+			func(t *testResultEntity) any { return &t.ScenarioName },
 			persistence.SQLite3SchemaFieldOptionsFilterable(),
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colTimestamp, persistence.SQLiteDataTypeInteger,
-			func(t *TestResultEntity) any { return t.Timestamp },
-			func(t *TestResultEntity) any { return &t.Timestamp },
+			func(t *testResultEntity) any { return t.Timestamp },
+			func(t *testResultEntity) any { return &t.Timestamp },
 			persistence.SQLite3SchemaFieldOptionsFilterable(),
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colPassed, persistence.SQLiteDataTypeInteger,
-			func(t *TestResultEntity) any { return t.Passed },
-			func(t *TestResultEntity) any { return &t.Passed },
+			func(t *testResultEntity) any { return t.Passed },
+			func(t *testResultEntity) any { return &t.Passed },
 			persistence.SQLite3SchemaFieldOptionsFilterable(),
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colDurationWall, persistence.SQLiteDataTypeInteger,
-			func(t *TestResultEntity) any { return t.DurationWall },
-			func(t *TestResultEntity) any { return &t.DurationWall },
+			func(t *testResultEntity) any { return t.DurationWall },
+			func(t *testResultEntity) any { return &t.DurationWall },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colDurationSummed, persistence.SQLiteDataTypeInteger,
-			func(t *TestResultEntity) any { return t.DurationSummed },
-			func(t *TestResultEntity) any { return &t.DurationSummed },
+			func(t *testResultEntity) any { return t.DurationSummed },
+			func(t *testResultEntity) any { return &t.DurationSummed },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colSeed, persistence.SQLiteDataTypeText,
-			func(t *TestResultEntity) any { return t.Seed },
-			func(t *TestResultEntity) any { return &t.Seed },
+			func(t *testResultEntity) any { return t.Seed },
+			func(t *testResultEntity) any { return &t.Seed },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colFuzzingPattern, persistence.SQLiteDataTypeInteger,
-			func(t *TestResultEntity) any { return t.FuzzingPattern },
-			func(t *TestResultEntity) any { return &t.FuzzingPattern },
+			func(t *testResultEntity) any { return t.FuzzingPattern },
+			func(t *testResultEntity) any { return &t.FuzzingPattern },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colMaxIterations, persistence.SQLiteDataTypeInteger,
-			func(t *TestResultEntity) any { return t.MaxIterations },
-			func(t *TestResultEntity) any { return &t.MaxIterations },
+			func(t *testResultEntity) any { return t.MaxIterations },
+			func(t *testResultEntity) any { return &t.MaxIterations },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colMaxDuration, persistence.SQLiteDataTypeInteger,
-			func(t *TestResultEntity) any { return t.MaxDuration },
-			func(t *TestResultEntity) any { return &t.MaxDuration },
+			func(t *testResultEntity) any { return t.MaxDuration },
+			func(t *testResultEntity) any { return &t.MaxDuration },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colUseDuration, persistence.SQLiteDataTypeInteger,
-			func(t *TestResultEntity) any { return t.UseDuration },
-			func(t *TestResultEntity) any { return &t.UseDuration },
+			func(t *testResultEntity) any { return t.UseDuration },
+			func(t *testResultEntity) any { return &t.UseDuration },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colProviderID, persistence.SQLiteDataTypeText,
-			func(t *TestResultEntity) any { return t.ProviderID },
-			func(t *TestResultEntity) any { return &t.ProviderID },
+			func(t *testResultEntity) any { return t.ProviderID },
+			func(t *testResultEntity) any { return &t.ProviderID },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 	)
 }
 
-func createGuardResultsTableDef() persistence.SQLite3TableConfiguration[GuardResultEntity] {
+func createGuardResultsTableDef() persistence.SQLite3TableConfiguration[guardResultEntity] {
 	return persistence.SQLite3TableConfigurationCreate(
 		guardResultsTableName,
 		persistence.SQLite3SchemaFieldCreateManual(
 			colGuardID, persistence.SQLiteDataTypeText,
-			func(t *GuardResultEntity) any { return t.GuardResultID },
-			func(t *GuardResultEntity) any { return &t.GuardResultID },
+			func(t *guardResultEntity) any { return t.GuardResultID },
+			func(t *guardResultEntity) any { return &t.GuardResultID },
 			persistence.SQLite3SchemaFieldOptionsPrimaryKey(),
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colGuardTestID, persistence.SQLiteDataTypeText,
-			func(t *GuardResultEntity) any { return t.TestResultID },
-			func(t *GuardResultEntity) any { return &t.TestResultID },
+			func(t *guardResultEntity) any { return t.TestResultID },
+			func(t *guardResultEntity) any { return &t.TestResultID },
 			persistence.SQLite3SchemaFieldOptionsBuilderCreate().
 				WithFilterable(true).
 				WithIndexable(true).
@@ -223,38 +223,38 @@ func createGuardResultsTableDef() persistence.SQLite3TableConfiguration[GuardRes
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colGuardName, persistence.SQLiteDataTypeText,
-			func(t *GuardResultEntity) any { return t.GuardName },
-			func(t *GuardResultEntity) any { return &t.GuardName },
+			func(t *guardResultEntity) any { return t.GuardName },
+			func(t *guardResultEntity) any { return &t.GuardName },
 			persistence.SQLite3SchemaFieldOptionsFilterable(),
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colGuardPassed, persistence.SQLiteDataTypeInteger,
-			func(t *GuardResultEntity) any { return t.Passed },
-			func(t *GuardResultEntity) any { return &t.Passed },
+			func(t *guardResultEntity) any { return t.Passed },
+			func(t *guardResultEntity) any { return &t.Passed },
 			persistence.SQLite3SchemaFieldOptionsFilterable(),
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colGuardDuration, persistence.SQLiteDataTypeInteger,
-			func(t *GuardResultEntity) any { return t.Duration },
-			func(t *GuardResultEntity) any { return &t.Duration },
+			func(t *guardResultEntity) any { return t.Duration },
+			func(t *guardResultEntity) any { return &t.Duration },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colGuardFailedSeed, persistence.SQLiteDataTypeText,
-			func(t *GuardResultEntity) any { return t.FailedSeed },
-			func(t *GuardResultEntity) any { return &t.FailedSeed },
+			func(t *guardResultEntity) any { return t.FailedSeed },
+			func(t *guardResultEntity) any { return &t.FailedSeed },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colGuardFailedIteration, persistence.SQLiteDataTypeInteger,
-			func(t *GuardResultEntity) any { return t.FailedIteration },
-			func(t *GuardResultEntity) any { return &t.FailedIteration },
+			func(t *guardResultEntity) any { return t.FailedIteration },
+			func(t *guardResultEntity) any { return &t.FailedIteration },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
 			colGuardFailureReason, persistence.SQLiteDataTypeText,
-			func(t *GuardResultEntity) any { return t.FailureReason },
-			func(t *GuardResultEntity) any { return &t.FailureReason },
+			func(t *guardResultEntity) any { return t.FailureReason },
+			func(t *guardResultEntity) any { return &t.FailureReason },
 			persistence.SQLite3SchemaFieldOptions{},
 		),
 	)
@@ -272,7 +272,7 @@ func TestResultDatabaseScenarioResultAdd(db *TestResultDatabase, scenarioResult 
 	scenarioEntity := mapScenarioToEntity(scenarioResult, scenarioID.String())
 	guardEntities := mapGuardsToEntities(scenarioID.String(), scenarioResult.GuardResults())
 
-	guardPointers := make([]*GuardResultEntity, len(guardEntities))
+	guardPointers := make([]*guardResultEntity, len(guardEntities))
 	for i := range guardEntities {
 		guardPointers[i] = &guardEntities[i]
 	}
@@ -295,12 +295,12 @@ func TestResultDatabaseScenarioResultFindByID(db *TestResultDatabase, id string)
 		return nil, err
 	}
 
-	scenarioEntity, err := persistence.SQLite3RepoGet[TestResultEntity](db.engine, testResultsTableName, id)
+	scenarioEntity, err := persistence.SQLite3RepoGet[testResultEntity](db.engine, testResultsTableName, id)
 	if err != nil {
 		return nil, fmt.Errorf("scenario %s not found: %w", id, err)
 	}
 
-	guardEntities, err := persistence.SQLite3RepoFindByField[GuardResultEntity](
+	guardEntities, err := persistence.SQLite3RepoFindByField[guardResultEntity](
 		db.engine, guardResultsTableName, colGuardTestID, id,
 	)
 	if err != nil {
@@ -310,33 +310,34 @@ func TestResultDatabaseScenarioResultFindByID(db *TestResultDatabase, id string)
 	return mapEntityToScenario(scenarioEntity, guardEntities), nil
 }
 
-func TestResultDatabaseScenarioResultFindByName(db *TestResultDatabase, name string) ([]*TestResultEntity, error) {
+func TestResultDatabaseScenarioResultFindByName(db *TestResultDatabase, name string) ([]*ScenarioRunResult, error) {
 	if err := testResultDatabaseEnsureOpen(db); err != nil {
 		return nil, err
 	}
 
-	found, err := persistence.SQLite3RepoFindByField[TestResultEntity](db.engine, testResultsTableName, colScenarioName, name)
+	scenarioEntities, err := persistence.SQLite3RepoFindByField[testResultEntity](db.engine, testResultsTableName, colScenarioName, name)
 	if err != nil {
 		return nil, fmt.Errorf("issue getting scenario results: %w", err)
 	}
-	return found, nil
-}
 
-func TestResultDatabaseGuardsFindByScenarioID(db *TestResultDatabase, scenarioID string) ([]*GuardResultEntity, error) {
-	if err := testResultDatabaseEnsureOpen(db); err != nil {
-		return nil, err
+	results := make([]*ScenarioRunResult, len(scenarioEntities))
+	for i, scenarioEntity := range scenarioEntities {
+		guardEntities, guardErr := persistence.SQLite3RepoFindByField[guardResultEntity](
+			db.engine, guardResultsTableName, colGuardTestID, scenarioEntity.ResultID,
+		)
+		if guardErr != nil {
+			return nil, fmt.Errorf("failed fetching guards for scenario %s: %w", scenarioEntity.ResultID, guardErr)
+		}
+
+		results[i] = mapEntityToScenario(scenarioEntity, guardEntities)
 	}
 
-	found, err := persistence.SQLite3RepoFindByField[GuardResultEntity](db.engine, guardResultsTableName, colGuardTestID, scenarioID)
-	if err != nil {
-		return nil, fmt.Errorf("issue getting guard results for scenario %s: %w", scenarioID, err)
-	}
-	return found, nil
+	return results, nil
 }
 
 // --------------------------------------------------------------- PRIVATE HELPERS
 
-func mapEntityToScenario(scenario *TestResultEntity, guards []*GuardResultEntity) *ScenarioRunResult {
+func mapEntityToScenario(scenario *testResultEntity, guards []*guardResultEntity) *ScenarioRunResult {
 	seedUUID, _ := essence.UUIDFromString(scenario.Seed)
 
 	domainGuards := make([]GuardEvaluationResult, len(guards))
@@ -370,7 +371,7 @@ func mapEntityToScenario(scenario *TestResultEntity, guards []*GuardResultEntity
 	}
 }
 
-func mapScenarioToEntity(scenario ScenarioRunResult, scenarioID string) TestResultEntity {
+func mapScenarioToEntity(scenario ScenarioRunResult, scenarioID string) testResultEntity {
 	cfg := scenario.SnapshotConfig()
 
 	passedInt, useDurationInt := 0, 0
@@ -381,7 +382,7 @@ func mapScenarioToEntity(scenario ScenarioRunResult, scenarioID string) TestResu
 		useDurationInt = 1
 	}
 
-	return TestResultEntity{
+	return testResultEntity{
 		ResultID:       scenarioID,
 		ScenarioName:   scenario.Name(),
 		Timestamp:      time.Now().UnixMilli(),
@@ -397,8 +398,8 @@ func mapScenarioToEntity(scenario ScenarioRunResult, scenarioID string) TestResu
 	}
 }
 
-func mapGuardsToEntities(scenarioID string, guards []GuardEvaluationResult) []GuardResultEntity {
-	entities := make([]GuardResultEntity, len(guards))
+func mapGuardsToEntities(scenarioID string, guards []GuardEvaluationResult) []guardResultEntity {
+	entities := make([]guardResultEntity, len(guards))
 
 	for i, g := range guards {
 		guardID, _ := essence.UUIDv7GenerateRandom()
@@ -408,7 +409,7 @@ func mapGuardsToEntities(scenarioID string, guards []GuardEvaluationResult) []Gu
 			passedInt = 1
 		}
 
-		entities[i] = GuardResultEntity{
+		entities[i] = guardResultEntity{
 			GuardResultID:   guardID.String(),
 			TestResultID:    scenarioID,
 			GuardName:       g.Name(),

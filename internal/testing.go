@@ -146,7 +146,8 @@ func GuardPolicyPredicate[TOutput any](
 type FuzzingPattern uint8
 
 const (
-	FuzzingPattern_EdgeCases FuzzingPattern = iota + 1
+	FuzzingPattern_None FuzzingPattern = iota + 1
+	FuzzingPattern_EdgeCases
 	FuzzingPattern_Standard
 	FuzzingPattern_Adversarial
 )
@@ -449,6 +450,10 @@ func ScenarioRun[TInput, TOutput any](
 		provider, name := config.EntropyProviderFactory(seed.ToUint128())
 		entropyProvider = provider
 		entropyProviderID = name
+	}
+
+	if config.FuzzingPattern == 0 {
+		config.FuzzingPattern = FuzzingPattern_None
 	}
 
 	result := ScenarioRunResult{
