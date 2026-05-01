@@ -26,11 +26,6 @@ SHIELD_Testing_ScenarioRunConfig sets runtime configuration for a scenario.
 type SHIELD_Testing_ScenarioRunConfig = internal.ScenarioRunConfig
 
 /*
-SHIELD_Testing_InputContext encapsulates the information used for the generators to produce input.
-*/
-type SHIELD_Testing_InputContext = internal.InputContext
-
-/*
 SHIELD_Testing_InputGenerator generates an input based on a seed and iteration number.
 
 NOTE: In order for this to work properly, the generated input MUST be DETERMINISTIC relative to seed and iteration.
@@ -135,8 +130,10 @@ func SHIELD_Testing_GuardCreate[TInput, TOutput any](
 	input TInput,
 	policies ...SHIELD_Testing_GuardPolicy[TOutput],
 ) SHIELD_Testing_Guard[TInput, TOutput] {
-	return internal.GuardCreate(name, func(_ SHIELD_Testing_InputContext) TInput {
-		return input
+	return internal.GuardCreate(name, func(_ internal.FuzzingContext) internal.InputIterator[TInput] {
+		return func() TInput {
+			return input
+		}
 	}, false, policies...)
 }
 

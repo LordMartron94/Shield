@@ -3,6 +3,8 @@ package internal
 import (
 	"essence"
 	"fmt"
+	"foundation"
+	"foundation/entropy"
 	"sort"
 	"time"
 )
@@ -146,7 +148,6 @@ type FuzzingPattern uint8
 const (
 	FuzzingPattern_EdgeCases FuzzingPattern = iota + 1
 	FuzzingPattern_Standard
-	FuzzingPattern_Exhaustive
 	FuzzingPattern_Adversarial
 )
 
@@ -160,15 +161,14 @@ type executionResult[TOutput any] struct {
 	panicMessage string
 }
 
-type InputContext struct {
-	Seed essence.UUID
-
-	Iteration uint64
-
-	Effort FuzzingPattern
+type FuzzingContext struct {
+	EntropyProvider *entropy.EntropyProvider
+	Effort          FuzzingPattern
 }
 
-type InputGenerator[TInput any] func(context InputContext) TInput
+type InputIterator[TInput any] func() TInput
+
+type InputGenerator[TInput any] func(ctx FuzzingContext) InputIterator[TInput]
 
 type Guard[TInput, TOutput any] struct {
 	name string
@@ -361,6 +361,7 @@ type SnapshotConfig struct {
 	MaxIterations  uint64
 	MaxDuration    time.Duration
 	UseDuration    bool
+	ProviderID     string
 }
 
 /*
@@ -409,7 +410,10 @@ func (s *ScenarioRunResult) SnapshotConfig() SnapshotConfig {
 }
 
 type ScenarioRunConfig struct {
-	SeedOverride   *essence.UUID
+	SeedOverride *essence.UUID
+
+	EntropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string)
+
 	FuzzingPattern FuzzingPattern
 
 	MaxIterations uint64
@@ -426,6 +430,18 @@ func ScenarioRun[TInput, TOutput any](
 		seed = *config.SeedOverride
 	}
 
+	var entropyProvider *entropy.EntropyProvider
+	var entropyProviderID string
+
+	if config.EntropyProviderFactory == nil {
+		entropyProvider = entropy.EntropyProviderCreateMixSplit128(seed.ToUint128())
+		entropyProviderID = "shield:default-mixsplit-128-compressed"
+	} else {
+		provider, name := config.EntropyProviderFactory(seed.ToUint128())
+		entropyProvider = provider
+		entropyProviderID = name
+	}
+
 	result := ScenarioRunResult{
 		scenarioName: scenario.name,
 		passed:       true,
@@ -436,6 +452,7 @@ func ScenarioRun[TInput, TOutput any](
 			MaxIterations:  config.MaxIterations,
 			MaxDuration:    config.MaxDuration,
 			UseDuration:    config.UseDuration,
+			ProviderID:     entropyProviderID,
 		},
 	}
 
@@ -443,7 +460,7 @@ func ScenarioRun[TInput, TOutput any](
 	var summedDuration time.Duration
 
 	for i, guard := range scenario.guards {
-		guardResult := evaluateGuard(guard, scenario.executor, seed, config)
+		guardResult := evaluateGuard(guard, scenario.executor, seed, config, entropyProvider)
 		result.guardResults[i] = guardResult
 
 		if !guardResult.passed {
@@ -465,6 +482,7 @@ func evaluateGuard[TInput, TOutput any](
 	executor Executor[TInput, TOutput],
 	seed essence.UUID,
 	config ScenarioRunConfig,
+	provider *entropy.EntropyProvider,
 ) GuardEvaluationResult {
 	if guard.isPoisoned {
 		return GuardEvaluationResult{
@@ -482,12 +500,13 @@ func evaluateGuard[TInput, TOutput any](
 
 	start := time.Now()
 
+	iterator := guard.inputGenerator(FuzzingContext{
+		EntropyProvider: provider,
+		Effort:          config.FuzzingPattern,
+	})
+
 	for i := uint64(0); !isEffortExhausted(start, i, config); i++ {
-		iterationInput := guard.inputGenerator(InputContext{
-			Seed:      seed,
-			Iteration: i,
-			Effort:    config.FuzzingPattern,
-		})
+		iterationInput := iterator()
 
 		execRes := executeSingleIteration(executor, iterationInput)
 		passed, reason := evaluatePolicies(guard.policies, execRes)
