@@ -15,7 +15,8 @@ const (
 	FlagExpectsNoPanic
 	FlagExpectsError
 	FlagExpectsNoError
-	FlagEvaluatesOutput
+	FlagEvaluatesStaticOutput
+	FlagEvaluatesProperty
 )
 
 func executionPhase(flags PolicyFlag) int {
@@ -91,7 +92,7 @@ func GuardPolicyMustNotEqual[TOutput any](
 	notExpected TOutput,
 ) GuardPolicy[TOutput] {
 	return GuardPolicy[TOutput]{
-		flags: FlagEvaluatesOutput,
+		flags: FlagEvaluatesStaticOutput,
 		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
 			if comparator(result.actual, notExpected) {
 				return false, fmt.Sprintf(
@@ -111,7 +112,7 @@ func GuardPolicyMustEqual[TOutput any](
 	expected TOutput,
 ) GuardPolicy[TOutput] {
 	return GuardPolicy[TOutput]{
-		flags: FlagEvaluatesOutput,
+		flags: FlagEvaluatesStaticOutput,
 		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
 			if !comparator(result.actual, expected) {
 				return false, fmt.Sprintf(
@@ -130,7 +131,7 @@ func GuardPolicyPredicate[TOutput any](
 	predicate func(actual TOutput) (passed bool, reason string),
 ) GuardPolicy[TOutput] {
 	return GuardPolicy[TOutput]{
-		flags: FlagEvaluatesOutput,
+		flags: FlagEvaluatesProperty,
 		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
 			return predicate(result.actual)
 		},
@@ -147,48 +148,87 @@ type executionResult[TOutput any] struct {
 	panicMessage string
 }
 
+type InputGenerator[TInput any] func(seed uint64, iteration uint64) TInput
+
 type Guard[TInput, TOutput any] struct {
 	name string
 
-	input    TInput
-	policies []GuardPolicy[TOutput]
+	inputGenerator InputGenerator[TInput]
+	policies       []GuardPolicy[TOutput]
+
+	isPoisoned   bool
+	poisonReason string
 }
 
 func GuardCreate[TInput, TOutput any](
 	name string,
-	input TInput,
+	generator InputGenerator[TInput],
+	isFuzzer bool,
 	policies ...GuardPolicy[TOutput],
 ) Guard[TInput, TOutput] {
+	if poisonReason := validateGuardPolicies(isFuzzer, policies); poisonReason != "" {
+		return injectPoisonPill[TInput, TOutput](name, generator, poisonReason)
+	}
 
+	policies = applyDefaultPolicies(policies)
+
+	sort.SliceStable(policies, func(i, j int) bool {
+		return executionPhase(policies[i].flags) < executionPhase(policies[j].flags)
+	})
+
+	return Guard[TInput, TOutput]{
+		name:           name,
+		inputGenerator: generator,
+		policies:       policies,
+		isPoisoned:     false,
+	}
+}
+
+func validateGuardPolicies[TOutput any](isFuzzer bool, policies []GuardPolicy[TOutput]) string {
 	if len(policies) == 0 {
-		return injectPoisonPill[TInput, TOutput](name, input, "0 policies provided")
+		return "0 policies provided"
 	}
 
 	var totalFlags PolicyFlag
-	outputPolicyCount := 0
+	var staticOutputCount, propertyCount int
 
 	for _, p := range policies {
-		if p.flags&FlagEvaluatesOutput != 0 {
-			outputPolicyCount++
-		}
 		totalFlags |= p.flags
+		if p.flags&FlagEvaluatesStaticOutput != 0 {
+			staticOutputCount++
+		}
+		if p.flags&FlagEvaluatesProperty != 0 {
+			propertyCount++
+		}
 	}
 
 	if (totalFlags&FlagExpectsPanic != 0) && (totalFlags&FlagExpectsNoPanic != 0) {
-		return injectPoisonPill[TInput, TOutput](name, input, "Conflicting policies: MustPanic and MustNotPanic combined")
+		return "Conflicting policies: MustPanic and MustNotPanic combined"
 	}
 	if (totalFlags&FlagExpectsError != 0) && (totalFlags&FlagExpectsNoError != 0) {
-		return injectPoisonPill[TInput, TOutput](name, input, "Conflicting policies: MustError and MustNotError combined")
+		return "Conflicting policies: MustError and MustNotError combined"
 	}
-	if outputPolicyCount > 1 {
-		return injectPoisonPill[TInput, TOutput](name, input, "Conflicting policies: Multiple output evaluations provided")
+	if (staticOutputCount + propertyCount) > 1 {
+		return "Conflicting policies: Multiple output evaluations provided"
+	}
+	if (totalFlags&FlagExpectsPanic != 0) && (staticOutputCount+propertyCount > 0) {
+		return "Logical error: Cannot evaluate output of a guard expected to panic"
+	}
+	if (totalFlags&FlagExpectsError != 0) && (staticOutputCount+propertyCount > 0) {
+		return "Logical error: Cannot evaluate output of a guard expected to error"
 	}
 
-	if (totalFlags&FlagExpectsPanic != 0) && (totalFlags&FlagEvaluatesOutput != 0) {
-		return injectPoisonPill[TInput, TOutput](name, input, "Logical error: Cannot evaluate output of a guard expected to panic")
+	if isFuzzer && staticOutputCount > 0 {
+		return "Logical error: Generative fuzzing guards cannot use static equality policies (MustEqual/MustNotEqual). Use Predicate."
 	}
-	if (totalFlags&FlagExpectsError != 0) && (totalFlags&FlagEvaluatesOutput != 0) {
-		return injectPoisonPill[TInput, TOutput](name, input, "Logical error: Cannot evaluate output of a guard expected to error")
+
+	return ""
+}
+
+func applyDefaultPolicies[TOutput any](policies []GuardPolicy[TOutput]) []GuardPolicy[TOutput] {
+	var totalFlags PolicyFlag
+	for _, p := range policies {
+		totalFlags |= p.flags
 	}
 
 	if totalFlags&(FlagExpectsPanic|FlagExpectsNoPanic) == 0 {
@@ -198,35 +238,20 @@ func GuardCreate[TInput, TOutput any](
 		policies = append(policies, GuardPolicyMustNotError[TOutput]())
 	}
 
-	sort.SliceStable(policies, func(i, j int) bool {
-		weightI := executionPhase(policies[i].flags)
-		weightJ := executionPhase(policies[j].flags)
-		return weightI < weightJ
-	})
-
-	return Guard[TInput, TOutput]{
-		name:     name,
-		input:    input,
-		policies: policies,
-	}
+	return policies
 }
 
 func injectPoisonPill[TInput, TOutput any](
 	name string,
-	input TInput,
+	inputGenerator InputGenerator[TInput],
 	reason string,
 ) Guard[TInput, TOutput] {
-	poisonPolicy := GuardPolicy[TOutput]{
-		flags: 0,
-		evaluate: func(_ executionResult[TOutput]) (bool, string) {
-			return false, fmt.Sprintf("FRAMEWORK ERROR: %s", reason)
-		},
-	}
-
 	return Guard[TInput, TOutput]{
-		name:     name,
-		input:    input,
-		policies: []GuardPolicy[TOutput]{poisonPolicy},
+		name:           name,
+		inputGenerator: inputGenerator,
+		policies:       nil,
+		isPoisoned:     true,
+		poisonReason:   reason,
 	}
 }
 
@@ -256,11 +281,12 @@ func ScenarioCreate[TInput, TOutput any](
 
 type GuardEvaluationResult struct {
 	guardName string
+	passed    bool
+	duration  time.Duration
 
-	passed   bool
-	duration time.Duration
-
-	failureReason string
+	failedSeed      uint64
+	failedIteration uint64
+	failureReason   string
 }
 
 /*
@@ -288,7 +314,10 @@ func (g *GuardEvaluationResult) Duration() time.Duration {
 FailureReason returns the reason for this guard to have failed.
 */
 func (g *GuardEvaluationResult) FailureReason() string {
-	return g.failureReason
+	if g.passed {
+		return ""
+	}
+	return fmt.Sprintf("Failed at Seed %d, Iteration %d: %s", g.failedSeed, g.failedIteration, g.failureReason)
 }
 
 type ScenarioRunResult struct {
@@ -342,36 +371,35 @@ func (s *ScenarioRunResult) GuardResults() []GuardEvaluationResult {
 	return cp
 }
 
+type ScenarioRunConfig struct {
+	Seed          uint64
+	MaxIterations uint64
+}
+
 func ScenarioRun[TInput, TOutput any](
 	scenario Scenario[TInput, TOutput],
+	config ScenarioRunConfig,
 ) ScenarioRunResult {
-	result := ScenarioRunResult{}
-	result.scenarioName = scenario.name
-
-	summedDuration := time.Duration(0)
-	guardAmount := len(scenario.guards)
-	result.guardResults = make([]GuardEvaluationResult, guardAmount)
-
-	passed := true
+	result := ScenarioRunResult{
+		scenarioName: scenario.name,
+		passed:       true,
+		guardResults: make([]GuardEvaluationResult, len(scenario.guards)),
+	}
 
 	start := time.Now()
+	var summedDuration time.Duration
 
-	for i := 0; i < guardAmount; i++ {
-		guard := scenario.guards[i]
-		guardResult := evaluateGuard(guard, scenario.executor)
+	for i, guard := range scenario.guards {
+		guardResult := evaluateGuard(guard, scenario.executor, config.Seed, config.MaxIterations)
 		result.guardResults[i] = guardResult
 
 		if !guardResult.passed {
-			passed = false
+			result.passed = false
 		}
-
 		summedDuration += guardResult.duration
 	}
 
-	end := time.Now()
-
-	result.passed = passed
-	result.totalDurationWall = end.Sub(start)
+	result.totalDurationWall = time.Since(start)
 	result.totalDurationSummed = summedDuration
 
 	return result
@@ -382,36 +410,68 @@ func ScenarioRun[TInput, TOutput any](
 func evaluateGuard[TInput, TOutput any](
 	guard Guard[TInput, TOutput],
 	executor Executor[TInput, TOutput],
-) (result GuardEvaluationResult) {
-	executionResult := executionResult[TOutput]{}
+	seed uint64,
+	maxIterations uint64,
+) GuardEvaluationResult {
+	if guard.isPoisoned {
+		return GuardEvaluationResult{
+			guardName:     guard.name,
+			passed:        false,
+			failureReason: fmt.Sprintf("FRAMEWORK ERROR: %s", guard.poisonReason),
+			duration:      0,
+		}
+	}
 
+	result := GuardEvaluationResult{
+		guardName: guard.name,
+		passed:    true,
+	}
+
+	start := time.Now()
+
+	for i := uint64(0); i < maxIterations; i++ {
+		iterationInput := guard.inputGenerator(seed, i)
+
+		execRes := executeSingleIteration(executor, iterationInput)
+		passed, reason := evaluatePolicies(guard.policies, execRes)
+
+		if !passed {
+			result.passed = false
+			result.failedSeed = seed
+			result.failedIteration = i
+			result.failureReason = reason
+			break
+		}
+	}
+
+	result.duration = time.Since(start)
+	return result
+}
+
+func executeSingleIteration[TInput, TOutput any](
+	executor Executor[TInput, TOutput],
+	input TInput,
+) (res executionResult[TOutput]) {
 	defer func() {
 		if r := recover(); r != nil {
-			executionResult.panicked = true
-			executionResult.panicMessage = fmt.Sprintf("%v", r)
-		}
-
-		for i := 0; i < len(guard.policies); i++ {
-			passed, reason := guard.policies[i].evaluate(executionResult)
-
-			if !passed {
-				result.passed = false
-				result.failureReason = reason
-				break
-			}
+			res.panicked = true
+			res.panicMessage = fmt.Sprintf("%v", r)
 		}
 	}()
 
-	result.guardName = guard.name
-	result.passed = true
+	res.actual, res.executionError = executor(input)
+	return res
+}
 
-	start := time.Now()
-	output, err := executor(guard.input)
-	end := time.Now()
-	result.duration = end.Sub(start)
-
-	executionResult.actual = output
-	executionResult.executionError = err
-
-	return result
+func evaluatePolicies[TOutput any](
+	policies []GuardPolicy[TOutput],
+	res executionResult[TOutput],
+) (bool, string) {
+	for _, policy := range policies {
+		passed, reason := policy.evaluate(res)
+		if !passed {
+			return false, reason
+		}
+	}
+	return true, ""
 }

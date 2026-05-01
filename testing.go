@@ -18,6 +18,18 @@ the evaluation halts and the failure reason is recorded in the telemetry.
 type SHIELD_Testing_GuardPolicy[TOutput any] = internal.GuardPolicy[TOutput]
 
 /*
+SHIELD_Testing_ScenarioRunConfig sets runtime configuration for a scenario.
+*/
+type SHIELD_Testing_ScenarioRunConfig = internal.ScenarioRunConfig
+
+/*
+SHIELD_Testing_InputGenerator generates an input based on a seed and iteration number.
+
+NOTE: In order for this to work properly, the generated input MUST be DETERMINISTIC relative to seed and iteration.
+*/
+type SHIELD_Testing_InputGenerator[TInput any] = internal.InputGenerator[TInput]
+
+/*
 SHIELD_Testing_GuardPolicyMustNotPanic enforces a Phase 1 (Severity 0) hardware/state trap.
 
 If the executor panics, the Engine will catch it, fail the guard immediately,
@@ -108,14 +120,27 @@ or a claim to be evaluated.
 type SHIELD_Testing_Guard[TInput, TOutput any] = internal.Guard[TInput, TOutput]
 
 /*
-SHIELD_Testing_GuardCreate creates a single guard to be executed on a scenario.
+SHIELD_Testing_GuardCreate creates a single guard with a single input to be executed on a scenario.
 */
 func SHIELD_Testing_GuardCreate[TInput, TOutput any](
 	name string,
 	input TInput,
 	policies ...SHIELD_Testing_GuardPolicy[TOutput],
 ) SHIELD_Testing_Guard[TInput, TOutput] {
-	return internal.GuardCreate(name, input, policies...)
+	return internal.GuardCreate(name, func(_, _ uint64) TInput {
+		return input
+	}, false, policies...)
+}
+
+/*
+SHIELD_Testing_GuardCreate_Fuzzed creates a single guard with a fuzzer to be executed on a scenario.
+*/
+func SHIELD_Testing_GuardCreate_Fuzzed[TInput, TOutput any](
+	name string,
+	inputGenerator SHIELD_Testing_InputGenerator[TInput],
+	policies ...SHIELD_Testing_GuardPolicy[TOutput],
+) SHIELD_Testing_Guard[TInput, TOutput] {
+	return internal.GuardCreate(name, inputGenerator, true, policies...)
 }
 
 /*
@@ -151,6 +176,7 @@ SHIELD_Testing_ScenarioRun runs a scenario and returns its result.
 */
 func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
 	scenario SHIELD_Testing_Scenario[TInput, TOutput],
+	runConfig SHIELD_Testing_ScenarioRunConfig,
 ) SHIELD_Testing_ScenarioRunResult {
-	return internal.ScenarioRun(scenario)
+	return internal.ScenarioRun(scenario, runConfig)
 }
