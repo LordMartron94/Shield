@@ -351,6 +351,16 @@ type ScenarioRunResult struct {
 	passed bool
 
 	guardResults []GuardEvaluationResult
+
+	runConfig SnapshotConfig
+}
+
+type SnapshotConfig struct {
+	Seed           essence.UUID
+	FuzzingPattern FuzzingPattern
+	MaxIterations  uint64
+	MaxDuration    time.Duration
+	UseDuration    bool
 }
 
 /*
@@ -391,6 +401,13 @@ func (s *ScenarioRunResult) GuardResults() []GuardEvaluationResult {
 	return cp
 }
 
+/*
+SnapshotConfig returns fuzzing configuration used by this scenario run.
+*/
+func (s *ScenarioRunResult) SnapshotConfig() SnapshotConfig {
+	return s.runConfig
+}
+
 type ScenarioRunConfig struct {
 	SeedOverride   *essence.UUID
 	FuzzingPattern FuzzingPattern
@@ -404,19 +421,26 @@ func ScenarioRun[TInput, TOutput any](
 	scenario Scenario[TInput, TOutput],
 	config ScenarioRunConfig,
 ) ScenarioRunResult {
-	result := ScenarioRunResult{
-		scenarioName: scenario.name,
-		passed:       true,
-		guardResults: make([]GuardEvaluationResult, len(scenario.guards)),
-	}
-
-	start := time.Now()
-	var summedDuration time.Duration
-
 	seed, _ := essence.UUIDv7GenerateRandom()
 	if config.SeedOverride != nil {
 		seed = *config.SeedOverride
 	}
+
+	result := ScenarioRunResult{
+		scenarioName: scenario.name,
+		passed:       true,
+		guardResults: make([]GuardEvaluationResult, len(scenario.guards)),
+		runConfig: SnapshotConfig{
+			Seed:           seed,
+			FuzzingPattern: config.FuzzingPattern,
+			MaxIterations:  config.MaxIterations,
+			MaxDuration:    config.MaxDuration,
+			UseDuration:    config.UseDuration,
+		},
+	}
+
+	start := time.Now()
+	var summedDuration time.Duration
 
 	for i, guard := range scenario.guards {
 		guardResult := evaluateGuard(guard, scenario.executor, seed, config)
