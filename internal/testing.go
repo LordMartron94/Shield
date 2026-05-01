@@ -345,6 +345,8 @@ type ScenarioRunResult struct {
 	// this is therefore semantically different from how the engine will store it.
 	scenarioName string
 
+	startedAt time.Time
+
 	totalDurationWall   time.Duration
 	totalDurationSummed time.Duration
 
@@ -409,6 +411,13 @@ func (s *ScenarioRunResult) SnapshotConfig() SnapshotConfig {
 	return s.runConfig
 }
 
+/*
+StartedAt returns when this scenario run started.
+*/
+func (s *ScenarioRunResult) StartedAt() time.Time {
+	return s.startedAt
+}
+
 type ScenarioRunConfig struct {
 	SeedOverride *essence.UUID
 
@@ -471,6 +480,7 @@ func ScenarioRun[TInput, TOutput any](
 
 	result.totalDurationWall = time.Since(start)
 	result.totalDurationSummed = summedDuration
+	result.startedAt = start
 
 	return result
 }

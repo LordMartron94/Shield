@@ -4,7 +4,7 @@ SHIELD stands for `Systematic Hierarchical Integration and Evaluation Layer for 
 
 It aims to be an integrated platform for ensuring programmed systems are operating as they should across multiple horizons and layers of analysis.
 
-Most notably, it is focused on *accuracy* in the form of *tests* and *performance* in the form of *benchmarks*. And of course, oneshot results are not worth a lot. SHIELD integrates **regression** detection by storing results in a database. This can be opted out of individually, which can be useful during testing.
+Most notably, it is focused on *accuracy* in the form of *tests* and *performance* in the form of *benchmarks*. And of course, oneshot results are not worth a lot. SHIELD integrates **regression** detection by storing results in a database. This is an opt-in behaviour.
 
 ## Design Philosophy
 
