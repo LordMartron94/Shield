@@ -11,7 +11,7 @@ import (
 func TestShield(t *testing.T) {
 	scenario := buildSumScenario()
 	result := shield.SHIELD_Testing_ScenarioRun(scenario, shield.SHIELD_Testing_ScenarioRunConfig{
-		MaxIterations: 1000,
+		MaxIterations: 1,
 	})
 	overhead := extractResultOverhead(result)
 

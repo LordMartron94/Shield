@@ -1,12 +1,15 @@
 package shield
 
-import "shield/internal"
+import (
+	"shield/internal"
+)
 
 /*
 This is the testing endpoint for SHIELD.
 
 Features:
 - Data-Driven Testing Setup
+- Fuzzing system
 */
 
 /*
@@ -21,6 +24,11 @@ type SHIELD_Testing_GuardPolicy[TOutput any] = internal.GuardPolicy[TOutput]
 SHIELD_Testing_ScenarioRunConfig sets runtime configuration for a scenario.
 */
 type SHIELD_Testing_ScenarioRunConfig = internal.ScenarioRunConfig
+
+/*
+SHIELD_Testing_InputContext encapsulates the information used for the generators to produce input.
+*/
+type SHIELD_Testing_InputContext = internal.InputContext
 
 /*
 SHIELD_Testing_InputGenerator generates an input based on a seed and iteration number.
@@ -127,7 +135,7 @@ func SHIELD_Testing_GuardCreate[TInput, TOutput any](
 	input TInput,
 	policies ...SHIELD_Testing_GuardPolicy[TOutput],
 ) SHIELD_Testing_Guard[TInput, TOutput] {
-	return internal.GuardCreate(name, func(_, _ uint64) TInput {
+	return internal.GuardCreate(name, func(_ SHIELD_Testing_InputContext) TInput {
 		return input
 	}, false, policies...)
 }

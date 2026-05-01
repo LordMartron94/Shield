@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"essence"
 	"fmt"
 	"sort"
 	"time"
@@ -138,6 +139,17 @@ func GuardPolicyPredicate[TOutput any](
 	}
 }
 
+// --------------------------------------------------------------- FUZZING
+
+type FuzzingPattern uint8
+
+const (
+	FuzzingPattern_EdgeCases FuzzingPattern = iota + 1
+	FuzzingPattern_Standard
+	FuzzingPattern_Exhaustive
+	FuzzingPattern_Adversarial
+)
+
 // --------------------------------------------------------------- GUARDS
 
 type executionResult[TOutput any] struct {
@@ -148,7 +160,15 @@ type executionResult[TOutput any] struct {
 	panicMessage string
 }
 
-type InputGenerator[TInput any] func(seed uint64, iteration uint64) TInput
+type InputContext struct {
+	Seed essence.UUID
+
+	Iteration uint64
+
+	Effort FuzzingPattern
+}
+
+type InputGenerator[TInput any] func(context InputContext) TInput
 
 type Guard[TInput, TOutput any] struct {
 	name string
@@ -284,7 +304,7 @@ type GuardEvaluationResult struct {
 	passed    bool
 	duration  time.Duration
 
-	failedSeed      uint64
+	failedSeed      essence.UUID
 	failedIteration uint64
 	failureReason   string
 }
@@ -317,7 +337,7 @@ func (g *GuardEvaluationResult) FailureReason() string {
 	if g.passed {
 		return ""
 	}
-	return fmt.Sprintf("Failed at Seed %d, Iteration %d: %s", g.failedSeed, g.failedIteration, g.failureReason)
+	return fmt.Sprintf("Failed at Seed %s, Iteration %d: %s", g.failedSeed.String(), g.failedIteration, g.failureReason)
 }
 
 type ScenarioRunResult struct {
@@ -372,8 +392,12 @@ func (s *ScenarioRunResult) GuardResults() []GuardEvaluationResult {
 }
 
 type ScenarioRunConfig struct {
-	Seed          uint64
+	SeedOverride   *essence.UUID
+	FuzzingPattern FuzzingPattern
+
 	MaxIterations uint64
+	MaxDuration   time.Duration
+	UseDuration   bool
 }
 
 func ScenarioRun[TInput, TOutput any](
@@ -389,8 +413,13 @@ func ScenarioRun[TInput, TOutput any](
 	start := time.Now()
 	var summedDuration time.Duration
 
+	seed, _ := essence.UUIDv7GenerateRandom()
+	if config.SeedOverride != nil {
+		seed = *config.SeedOverride
+	}
+
 	for i, guard := range scenario.guards {
-		guardResult := evaluateGuard(guard, scenario.executor, config.Seed, config.MaxIterations)
+		guardResult := evaluateGuard(guard, scenario.executor, seed, config)
 		result.guardResults[i] = guardResult
 
 		if !guardResult.passed {
@@ -410,8 +439,8 @@ func ScenarioRun[TInput, TOutput any](
 func evaluateGuard[TInput, TOutput any](
 	guard Guard[TInput, TOutput],
 	executor Executor[TInput, TOutput],
-	seed uint64,
-	maxIterations uint64,
+	seed essence.UUID,
+	config ScenarioRunConfig,
 ) GuardEvaluationResult {
 	if guard.isPoisoned {
 		return GuardEvaluationResult{
@@ -429,8 +458,12 @@ func evaluateGuard[TInput, TOutput any](
 
 	start := time.Now()
 
-	for i := uint64(0); i < maxIterations; i++ {
-		iterationInput := guard.inputGenerator(seed, i)
+	for i := uint64(0); !isEffortExhausted(start, i, config); i++ {
+		iterationInput := guard.inputGenerator(InputContext{
+			Seed:      seed,
+			Iteration: i,
+			Effort:    config.FuzzingPattern,
+		})
 
 		execRes := executeSingleIteration(executor, iterationInput)
 		passed, reason := evaluatePolicies(guard.policies, execRes)
@@ -446,6 +479,13 @@ func evaluateGuard[TInput, TOutput any](
 
 	result.duration = time.Since(start)
 	return result
+}
+
+func isEffortExhausted(start time.Time, iterations uint64, config ScenarioRunConfig) bool {
+	if config.UseDuration {
+		return time.Since(start) >= config.MaxDuration
+	}
+	return iterations >= config.MaxIterations
 }
 
 func executeSingleIteration[TInput, TOutput any](
