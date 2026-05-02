@@ -1,6 +1,9 @@
 package shield
 
-import "shield/internal"
+import (
+	"fmt"
+	"shield/internal"
+)
 
 /*
 SHIELD regression endpoints compare scenario run outcomes:
@@ -9,10 +12,23 @@ SHIELD regression endpoints compare scenario run outcomes:
 
 - Population stability comparison (`SHIELD_Regression_CheckStability`) for many baseline vs many target runs using asymptotic/statistical summaries.
 
-Neither path performs HTTP; they are ordinary package functions usable from tools and harness code like the testing API in `testing.go`.
+- Convenience loaders (`SHIELD_Regression_CheckIdenticalFromStorage`, `SHIELD_Regression_CheckStabilityFromStorage`) hydrate those comparisons from persisted aggregates via `SHIELD_Testing_Storage_*`.
 
 All heavy logic lives under `shield/internal`; this file is a typed facade only.
 */
+
+func slicesFromStoredScenarioPointers(
+	ps []*internal.ScenarioRunResult,
+) ([]internal.ScenarioRunResult, error) {
+	out := make([]internal.ScenarioRunResult, len(ps))
+	for i, ptr := range ps {
+		if ptr == nil {
+			return nil, fmt.Errorf("scenario run slice contains nil aggregate at index %d", i)
+		}
+		out[i] = *ptr
+	}
+	return out, nil
+}
 
 /*
 SHIELD_Regression_Severity labels the kind of change detected when regressing guards or populations.
@@ -157,4 +173,83 @@ func SHIELD_Regression_CheckStability(
 	confidenceLevel float64,
 ) (SHIELD_Regression_Stability_Result, error) {
 	return internal.CheckStabilityRegression(baseline, target, confidenceLevel)
+}
+
+/*
+SHIELD_Regression_CheckIdenticalFromStorage loads two aggregates by persisted IDs and evaluates identical-regression parity.
+
+baselineResultID selects the authoritative row; targetResultID selects the candidate row inside the configured storage engine.
+
+[Side Effects]
+
+Performs SQLite reads (`SHIELD_Testing_Storage_ScenarioResultFindByID`) ensuring the transactional connection lifecycle managed by callers.
+
+Returns the same RegressionResult semantics as manual `SHIELD_Regression_CheckIdentical` invocation.
+
+Both IDs must correspond to materially comparable scenarios; IDs missing from storage propagate repository errors verbatim.
+*/
+func SHIELD_Regression_CheckIdenticalFromStorage(
+	engine *SHIELD_Testing_Storage_Engine,
+	baselineResultID string,
+	targetResultID string,
+) (SHIELD_Regression_Result, error) {
+	baselineAgg, err := SHIELD_Testing_Storage_ScenarioResultFindByID(engine, baselineResultID)
+	if err != nil {
+		var zero SHIELD_Regression_Result
+		return zero, fmt.Errorf("load baseline scenario row %s: %w", baselineResultID, err)
+	}
+	targetAgg, err := SHIELD_Testing_Storage_ScenarioResultFindByID(engine, targetResultID)
+	if err != nil {
+		var zero SHIELD_Regression_Result
+		return zero, fmt.Errorf("load target scenario row %s: %w", targetResultID, err)
+	}
+
+	return SHIELD_Regression_CheckIdentical(*baselineAgg, *targetAgg)
+}
+
+/*
+SHIELD_Regression_CheckStabilityFromStorage gathers stored cohort aggregates for paired scenario names across optional distinct engines before delegating stability analysis.
+
+baselineEngine/baselineScenarioName designates the authoritative population; targetEngine/targetScenarioName designates the challenger population.
+
+Use the same engine pointer twice when both cohorts share one SQLite ledger but differing scenario_name labels (for example partitioned datasets).
+
+Ordering note:
+
+Stored rows follow repository iteration order for the filter (`scenario_name`). Do not infer temporal ordering unless the caller establishes it elsewhere.
+
+ConfidenceLevel behaves identically to `SHIELD_Regression_CheckStability` after hydrating slices via `FindByName`.
+*/
+func SHIELD_Regression_CheckStabilityFromStorage(
+	baselineEngine *SHIELD_Testing_Storage_Engine,
+	baselineScenarioName string,
+	targetEngine *SHIELD_Testing_Storage_Engine,
+	targetScenarioName string,
+	confidenceLevel float64,
+) (SHIELD_Regression_Stability_Result, error) {
+	var zero SHIELD_Regression_Stability_Result
+
+	basePtrs, err := SHIELD_Testing_Storage_ScenarioResultFindByName(baselineEngine, baselineScenarioName)
+	if err != nil {
+		return zero, fmt.Errorf(
+			"load baseline cohort %q: %w", baselineScenarioName, err)
+	}
+
+	tgtPtrs, err := SHIELD_Testing_Storage_ScenarioResultFindByName(targetEngine, targetScenarioName)
+	if err != nil {
+		return zero, fmt.Errorf(
+			"load target cohort %q: %w", targetScenarioName, err)
+	}
+
+	baselineRuns, err := slicesFromStoredScenarioPointers(basePtrs)
+	if err != nil {
+		return zero, fmt.Errorf("baseline aggregate slice invalid: %w", err)
+	}
+
+	targetRuns, err := slicesFromStoredScenarioPointers(tgtPtrs)
+	if err != nil {
+		return zero, fmt.Errorf("target aggregate slice invalid: %w", err)
+	}
+
+	return SHIELD_Regression_CheckStability(baselineRuns, targetRuns, confidenceLevel)
 }
