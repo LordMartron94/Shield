@@ -565,29 +565,39 @@ func (o *OperationRunResult) Name() string {
 }
 
 /*
-Passed returns whether every scenario run under this operation passed.
-Startup failure yields false without scenario results.
+Passed reports whether startup, aggregated scenarios, and teardown (when reached) succeeded.
+
+Startup panic or non-nil error still yields false alongside a synthetic Operation_Startup_Failure row.
+Recovered panics inside runScenarios or teardown similarly append synthetic failures and force false here.
 */
 func (o *OperationRunResult) Passed() bool {
 	return o.passed
 }
 
 /*
-WallDuration returns wall-clock time spent in runScenarios (excluding startup and teardown duration).
+WallDuration is wall time from OperationRun entry until WallDuration bookkeeping finishes (excluding deferred teardown work),
+
+capturing startup / runScenarios / aggregation only. Shortcut failure returns snapshot immediately after injecting synthetics,
+
+before any teardown registered on startup success executes.
 */
 func (o *OperationRunResult) WallDuration() time.Duration {
 	return o.totalDurationWall
 }
 
 /*
-SummedDuration returns the sum of each scenario's SummedDuration().
+SummedDuration returns the sum of each aggregated ScenarioRunResult.SummedDuration after runScenarios.
+
+Startup-only or runScenarios-panic shortcuts skip that loop entirely, yielding zero alongside synthetic telemetry rows.
 */
 func (o *OperationRunResult) SummedDuration() time.Duration {
 	return o.totalDurationSummed
 }
 
 /*
-ScenarioResults returns a copy of the scenario results from this operation run.
+ScenarioResults returns a copy of aggregated rows for this operation, including synthetic
+
+Operation_*_Failure scenarios recorded when startup, runScenarios, or teardown fails inside guarded execution.
 */
 func (o *OperationRunResult) ScenarioResults() []ScenarioRunResult {
 	cp := make([]ScenarioRunResult, len(o.scenarioResults))
@@ -604,7 +614,9 @@ func (o *OperationRunResult) ZonePath() ZonePath {
 }
 
 /*
-StartedAt returns when the scenario batch began (after startup succeeded). Startup failure yields a zero value.
+StartedAt timestamps OperationRun entry (before startup)—the baseline stamped onto synthetic ScenarioRunResults
+
+and unrelated to timestamps inside ScenarioRun snapshots produced deeper in runScenarios.
 */
 func (o *OperationRunResult) StartedAt() time.Time {
 	return o.startedAt
@@ -636,42 +648,114 @@ func OperationCreate[TState any](
 	}
 }
 
-func OperationRun[TState any](operation *Operation[TState]) OperationRunResult {
-	result := OperationRunResult{
+func OperationRun[TState any](operation *Operation[TState]) (result OperationRunResult) {
+	start := time.Now()
+
+	result = OperationRunResult{
 		operationName: operation.name,
 		zonePath:      operation.zonePath,
+		startedAt:     start,
+		passed:        false,
 	}
 
-	state, err := operation.startup()
-	if err != nil {
-		result.passed = false
-		operation.teardown(state)
+	createSyntheticScenario := func(scenarioName, guardName, reason string) ScenarioRunResult {
+		return ScenarioRunResult{
+			scenarioName: scenarioName,
+			zonePath:     operation.zonePath,
+			startedAt:    start,
+			passed:       false,
+			guardResults: []GuardEvaluationResult{
+				{
+					guardName:     guardName,
+					passed:        false,
+					duration:      time.Since(start),
+					failureReason: reason,
+				},
+			},
+		}
+	}
+
+	// 1. Safely Execute Startup
+	var state TState
+	var startupErr error
+	var startupPanicked bool
+	var startupPanicMsg string
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				startupPanicked = true
+				startupPanicMsg = fmt.Sprintf("%v", r)
+			}
+		}()
+		state, startupErr = operation.startup()
+	}()
+
+	if startupPanicked {
+		result.scenarioResults = []ScenarioRunResult{
+			createSyntheticScenario("Operation_Startup_Failure", "startup_execution", fmt.Sprintf("startup panicked: %s", startupPanicMsg)),
+		}
+		result.totalDurationWall = time.Since(start)
 		return result
 	}
 
-	defer operation.teardown(state)
+	if startupErr != nil {
+		result.scenarioResults = []ScenarioRunResult{
+			createSyntheticScenario("Operation_Startup_Failure", "startup_execution", fmt.Sprintf("startup failed: %v", startupErr)),
+		}
+		result.totalDurationWall = time.Since(start)
+		return result
+	}
 
-	start := time.Now()
-	scenarioResults := operation.runScenarios(state)
-	end := time.Now()
+	// Deferred teardown after startup success: runs on all returns from this scope; panics isolate to synthesised telemetry.
+	defer func() {
+		defer func() {
+			if r := recover(); r != nil {
+				result.passed = false
+				teardownFail := createSyntheticScenario("Operation_Teardown_Failure", "teardown_execution", fmt.Sprintf("teardown panicked: %v", r))
+				result.scenarioResults = append(result.scenarioResults, teardownFail)
+			}
+		}()
+		operation.teardown(state)
+	}()
 
-	wall := end.Sub(start)
+	// 3. Safely Execute Scenarios
+	var scenarioResults []ScenarioRunResult
+	var scenariosPanicked bool
+	var scenariosPanicMsg string
 
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				scenariosPanicked = true
+				scenariosPanicMsg = fmt.Sprintf("%v", r)
+			}
+		}()
+		scenarioResults = operation.runScenarios(state)
+	}()
+
+	if scenariosPanicked {
+		result.passed = false
+		result.scenarioResults = []ScenarioRunResult{
+			createSyntheticScenario("Operation_Execution_Failure", "runScenarios_execution", fmt.Sprintf("runScenarios panicked: %s", scenariosPanicMsg)),
+		}
+		result.totalDurationWall = time.Since(start)
+		return result
+	}
+
+	// 4. Standard Aggregation
 	result.passed = true
-
 	var summedDuration time.Duration
+
 	for _, scenarioResult := range scenarioResults {
 		summedDuration += scenarioResult.totalDurationSummed
-
 		if !scenarioResult.passed {
 			result.passed = false
 		}
 	}
 
-	result.totalDurationWall = wall
+	result.totalDurationWall = time.Since(start)
 	result.totalDurationSummed = summedDuration
-
-	result.startedAt = start
 	result.scenarioResults = scenarioResults
 
 	return result

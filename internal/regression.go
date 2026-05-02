@@ -243,17 +243,30 @@ func validateIdenticalSignatures(base SnapshotConfig, tgt SnapshotConfig) error 
 	return nil
 }
 
+// compareGuards pairs by guard name with baseline as the driver: missing target rows become OutcomeShift;
+// left-over target-only guards are ignored. Per-pair logic is evaluateGuardDelta.
 func compareGuards(baseGuards []GuardEvaluationResult, tgtGuards []GuardEvaluationResult) []GuardRegressionDelta {
-	baseMap := make(map[string]GuardEvaluationResult, len(baseGuards))
-	for _, g := range baseGuards {
-		baseMap[g.Name()] = g
+	tgtMap := make(map[string]GuardEvaluationResult, len(tgtGuards))
+	for _, g := range tgtGuards {
+		tgtMap[g.Name()] = g
 	}
 
-	deltas := make([]GuardRegressionDelta, 0, len(tgtGuards))
+	deltas := make([]GuardRegressionDelta, 0)
 
-	for _, tgtGuard := range tgtGuards {
-		baseGuard, exists := baseMap[tgtGuard.Name()]
+	for _, baseGuard := range baseGuards {
+		tgtGuard, exists := tgtMap[baseGuard.Name()]
+
 		if !exists {
+			deltas = append(deltas, GuardRegressionDelta{
+				GuardName:      baseGuard.Name(),
+				Severity:       RegressionSeverity_OutcomeShift,
+				BaselinePassed: baseGuard.Passed(),
+				TargetPassed:   false,
+				BaselineIter:   baseGuard.failedIteration,
+				TargetIter:     0,
+				BaselineReason: baseGuard.FailureReason(),
+				TargetReason:   "Missing data: Guard disappeared from target run (Execution aborted?)",
+			})
 			continue
 		}
 
@@ -266,6 +279,8 @@ func compareGuards(baseGuards []GuardEvaluationResult, tgtGuards []GuardEvaluati
 	return deltas
 }
 
+// evaluateGuardDelta classifies a name-aligned pair. After pass/fail handling, both-fail cases compare
+// FailureReason() strings first (divergence → FailureDegradation), then earlier target failure iteration (FragilityIncrease).
 func evaluateGuardDelta(base GuardEvaluationResult, tgt GuardEvaluationResult) GuardRegressionDelta {
 	delta := GuardRegressionDelta{
 		GuardName:      tgt.Name(),

@@ -44,11 +44,11 @@ Interpretation shorthand:
 
 Improvement → situation got strictly better relative to baseline for that guard or slice.
 
-OutcomeShift → pass/failure mass moved in an adverse direction (stability checks use this after a pooled two-proportion test).
+OutcomeShift → pass/failure mass moved in an adverse direction (identical runs: pass→fail or a baseline guard missing from the target run); stability uses this after a pooled two-proportion test.
 
-FragilityIncrease → failures surface earlier along the fuzz iteration axis.
+SHIELD_Regression_Severity_FragilityShift (serialised "FragilityIncrease") → paired identical runs only: both failed with the same SHIELD guard FailureReason string, but the target failed strictly earlier on the fuzz-iteration axis.
 
-FailureDegradation → both baseline and target fail but failure surface worsened (paired guard comparison).
+SHIELD_Regression_Severity_Degradation (serialised "FailureDegradation") → paired identical runs only: both failed, and the stringified FailureReason telemetry differs between baseline and target before iteration is considered.
 
 None → no regressing severity for that delta or verdict.
 */
@@ -63,9 +63,13 @@ const (
 /*
 SHIELD_Regression_GuardDelta reports one paired-guard divergence between deterministic baseline and target runs.
 
-Fields carry pass/failure bits, earliest failing iteration bookkeeping, and stringified telemetry reasons reconstructed from Shield's guard evaluation snapshots.
+Pairing walks baseline guard order and joins each row to the target run by guard name; extra target-only guards are ignored.
 
-Population stability checks populate no per-guard deltas; this structure is exercised by `SHIELD_Regression_CheckIdentical` today.
+When a baseline guard has no same-named target entry, TargetPassed is false and TargetReason documents the absence (OutcomeShift).
+
+Fields carry pass bits, recorded failed-iteration indices from each evaluation snapshot, and FailureReason strings as exposed by the testing API.
+
+Population stability checks emit no per-guard deltas; this structure is used by `SHIELD_Regression_CheckIdentical`.
 */
 type SHIELD_Regression_GuardDelta = internal.GuardRegressionDelta
 
@@ -78,7 +82,7 @@ SHIELD_Regression_Result packages `SHIELD_Regression_CheckIdentical` output.
 
 `GuardDeltas` contains only severity-non-none guard transitions (internal filtering).
 
-`IsRegression` is true whenever any tracked delta bears OutcomeShift, FragilityIncrease, or FailureDegradation severities relative to regressing polarity rules.
+`IsRegression` is true whenever any tracked delta bears OutcomeShift, Degradation, or FragilityShift severities under the internal polarity rules.
 */
 type SHIELD_Regression_Result = internal.RegressionResult
 
@@ -117,9 +121,7 @@ SHIELD_Regression_CheckIdentical performs deterministic pairwise regression betw
 
 Validated snapshot knobs (Seed, FuzzingPattern, MaxIterations) must match exactly; divergence aborts before guard comparison.
 
-Intersecting guards (matched by exported guard name ordering on target enumeration) accumulate severity-ranked deltas excluding strictly informational none entries.
-
-Improvement severities populate `GuardDeltas` yet do not themselves flip `IsRegression`.
+Guard regression walks baseline `GuardResults` in order, resolving each name against the target run. For each pair: pass/fail flips map to Improvement or OutcomeShift; when both fail, Shield first compares FailureReason strings—any change yields FailureDegradation; if reasons match, strictly earlier target failure iteration yields FragilityIncrease (FragilityShift constant). Missing target guards synthesize an OutcomeShift row. Target-only guards are not compared. Deltas omit severities of None. Improvements are listed but do not set `IsRegression`.
 
 [Returns]
 

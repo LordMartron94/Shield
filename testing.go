@@ -10,7 +10,7 @@ This is the testing endpoint for SHIELD.
 Features:
 - Data-Driven Testing Setup
 - Fuzzing system
-- Operation-scoped lifecycle (startup → scenarios → teardown)
+- Operation-scoped lifecycle with deferred teardown; framework panics become synthetic ScenarioRunResults
 */
 
 /*
@@ -226,32 +226,39 @@ func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
 }
 
 /*
-SHIELD_Testing_Operation groups scenarios that share expensive setup shared state.
+SHIELD_Testing_Operation groups scenarios that share expensive setup state.
 
-The engine runs startup once to obtain TState, runs every scenario callable with that state,
-then runs teardown regardless of outcome. Passing is the conjunction of all scenario passes;
-startup failure fails the operation immediately without running scenarios.
+After successful startup the runner calls runScenarios, snapshots WallDuration and sums, then runs deferred teardown.
 
-Zone segments are identical in meaning to ScenarioCreate trailing zones—metadata only, applied
-to the OperationRunResult attribution.
+Startup error or panic skips user scenarios yet still records synthetic Operation_Startup_Failure telemetry.
+
+Panic inside runScenarios or teardown is recovered inside the runner, translated into Operation_Execution_Failure
+
+or appended Operation_Teardown_Failure rows, and does not escape to callers of SHIELD_Testing_OperationRun.
+
+Passed is false on any constituent scenario failure or any synthetic fault row. Teardown is skipped when startup never succeeds.
+
+Zone segments mirror ScenarioCreate trailing zones—metadata-only on attribution.
 */
 type SHIELD_Testing_Operation[TState any] = internal.Operation[TState]
 
 /*
-SHIELD_Testing_OperationRunResult aggregates wall and summed durations and per-scenario outcomes
-after an OperationRun completes.
+SHIELD_Testing_OperationRunResult aggregates WallDuration (pre-teardown snapshot), summed scenario durations,
+
+and scenario rows—including synthetic framing rows emitted on framework faults. StartedAt anchors OperationRun entry.
 */
 type SHIELD_Testing_OperationRunResult = internal.OperationRunResult
 
 /*
 SHIELD_Testing_OperationCreate configures an Operation with lifecycle hooks.
 
-Optional trailing zone arguments form ZonePath metadata via SHIELD_Testing_ZonePathCreate.
+Trailing zone strings map through SHIELD_Testing_ZonePathCreate like ScenarioCreate—metadata only.
 
-Startup must succeed (nil error return) before runScenarios is invoked with the produced state.
-After successful startup, teardown always runs once runScenarios returns or panics.
+When startup returns `(state, nil)` without recovering a panic the runner invokes runScenarios(state); failures or panics therein never escape.
 
-runScenarios should typically call SHIELD_Testing_ScenarioRun for each bundled scenario while reusing config.
+Deferred teardown always runs once startup succeeds, after WallDuration bookkeeping; teardown panic appends synthetic Operation_Teardown_Failure.
+
+runScenarios usually loops SHIELD_Testing_ScenarioRun while reusing run configuration.
 */
 func SHIELD_Testing_OperationCreate[TState any](
 	name string,
@@ -265,9 +272,11 @@ func SHIELD_Testing_OperationCreate[TState any](
 }
 
 /*
-SHIELD_Testing_OperationRun executes startup, runs the scenario batch from runScenarios with deferred
-teardown, and returns OperationRunResult. The caller passes the address of a value returned from
-OperationCreate.
+SHIELD_Testing_OperationRun executes startup, guarded runScenarios, aggregation snapshot, deferred teardown,
+
+and yields OperationRunResult without propagating panics—framework faults materialize as synthetic telemetry instead.
+
+Caller passes `&operation` populated by OperationCreate.
 */
 func SHIELD_Testing_OperationRun[TState any](operation *SHIELD_Testing_Operation[TState]) SHIELD_Testing_OperationRunResult {
 	return internal.OperationRun(operation)
