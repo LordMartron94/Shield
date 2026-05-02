@@ -10,6 +10,7 @@ This is the testing endpoint for SHIELD.
 Features:
 - Data-Driven Testing Setup
 - Fuzzing system
+- Operation-scoped lifecycle (startup → scenarios → teardown)
 */
 
 /*
@@ -222,4 +223,52 @@ func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
 	runConfig SHIELD_Testing_ScenarioRunConfig,
 ) SHIELD_Testing_ScenarioRunResult {
 	return internal.ScenarioRun(scenario, runConfig)
+}
+
+/*
+SHIELD_Testing_Operation groups scenarios that share expensive setup shared state.
+
+The engine runs startup once to obtain TState, runs every scenario callable with that state,
+then runs teardown regardless of outcome. Passing is the conjunction of all scenario passes;
+startup failure fails the operation immediately without running scenarios.
+
+Zone segments are identical in meaning to ScenarioCreate trailing zones—metadata only, applied
+to the OperationRunResult attribution.
+*/
+type SHIELD_Testing_Operation[TState any] = internal.Operation[TState]
+
+/*
+SHIELD_Testing_OperationRunResult aggregates wall and summed durations and per-scenario outcomes
+after an OperationRun completes.
+*/
+type SHIELD_Testing_OperationRunResult = internal.OperationRunResult
+
+/*
+SHIELD_Testing_OperationCreate configures an Operation with lifecycle hooks.
+
+Optional trailing zone arguments form ZonePath metadata via SHIELD_Testing_ZonePathCreate.
+
+Startup must succeed (nil error return) before runScenarios is invoked with the produced state.
+After successful startup, teardown always runs once runScenarios returns or panics.
+
+runScenarios should typically call SHIELD_Testing_ScenarioRun for each bundled scenario while reusing config.
+*/
+func SHIELD_Testing_OperationCreate[TState any](
+	name string,
+	startup func() (TState, error),
+	teardown func(state TState),
+	runScenarios func(state TState) []SHIELD_Testing_ScenarioRunResult,
+	zones ...string,
+) SHIELD_Testing_Operation[TState] {
+	zonePath := SHIELD_Testing_ZonePathCreate(zones...)
+	return internal.OperationCreate(name, zonePath, startup, teardown, runScenarios)
+}
+
+/*
+SHIELD_Testing_OperationRun executes startup, runs the scenario batch from runScenarios with deferred
+teardown, and returns OperationRunResult. The caller passes the address of a value returned from
+OperationCreate.
+*/
+func SHIELD_Testing_OperationRun[TState any](operation *SHIELD_Testing_Operation[TState]) SHIELD_Testing_OperationRunResult {
+	return internal.OperationRun(operation)
 }

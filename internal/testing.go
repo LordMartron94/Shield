@@ -541,6 +541,142 @@ func ScenarioRun[TInput, TOutput any](
 	return result
 }
 
+// --------------------------------------------------------------- OPERATION
+
+type OperationRunResult struct {
+	operationName string
+	zonePath      ZonePath
+
+	startedAt time.Time
+
+	totalDurationWall   time.Duration
+	totalDurationSummed time.Duration
+
+	passed bool
+
+	scenarioResults []ScenarioRunResult
+}
+
+/*
+Name returns the operation name for this result.
+*/
+func (o *OperationRunResult) Name() string {
+	return o.operationName
+}
+
+/*
+Passed returns whether every scenario run under this operation passed.
+Startup failure yields false without scenario results.
+*/
+func (o *OperationRunResult) Passed() bool {
+	return o.passed
+}
+
+/*
+WallDuration returns wall-clock time spent in runScenarios (excluding startup and teardown duration).
+*/
+func (o *OperationRunResult) WallDuration() time.Duration {
+	return o.totalDurationWall
+}
+
+/*
+SummedDuration returns the sum of each scenario's SummedDuration().
+*/
+func (o *OperationRunResult) SummedDuration() time.Duration {
+	return o.totalDurationSummed
+}
+
+/*
+ScenarioResults returns a copy of the scenario results from this operation run.
+*/
+func (o *OperationRunResult) ScenarioResults() []ScenarioRunResult {
+	cp := make([]ScenarioRunResult, len(o.scenarioResults))
+	copy(cp, o.scenarioResults)
+
+	return cp
+}
+
+/*
+ZonePath returns the operation's zone metadata at run time (execution ignores it aside from attribution).
+*/
+func (o *OperationRunResult) ZonePath() ZonePath {
+	return o.zonePath
+}
+
+/*
+StartedAt returns when the scenario batch began (after startup succeeded). Startup failure yields a zero value.
+*/
+func (o *OperationRunResult) StartedAt() time.Time {
+	return o.startedAt
+}
+
+type Operation[TState any] struct {
+	name     string
+	zonePath ZonePath
+
+	startup  func() (TState, error)
+	teardown func(state TState)
+
+	runScenarios func(state TState) []ScenarioRunResult
+}
+
+func OperationCreate[TState any](
+	name string,
+	zonePath ZonePath,
+	startup func() (TState, error),
+	teardown func(state TState),
+	runScenarios func(state TState) []ScenarioRunResult,
+) Operation[TState] {
+	return Operation[TState]{
+		name:         name,
+		zonePath:     zonePath,
+		startup:      startup,
+		teardown:     teardown,
+		runScenarios: runScenarios,
+	}
+}
+
+func OperationRun[TState any](operation *Operation[TState]) OperationRunResult {
+	result := OperationRunResult{
+		operationName: operation.name,
+		zonePath:      operation.zonePath,
+	}
+
+	state, err := operation.startup()
+	if err != nil {
+		result.passed = false
+		operation.teardown(state)
+		return result
+	}
+
+	defer operation.teardown(state)
+
+	start := time.Now()
+	scenarioResults := operation.runScenarios(state)
+	end := time.Now()
+
+	wall := end.Sub(start)
+
+	result.passed = true
+
+	var summedDuration time.Duration
+	for _, scenarioResult := range scenarioResults {
+		summedDuration += scenarioResult.totalDurationSummed
+
+		if !scenarioResult.passed {
+			result.passed = false
+		}
+	}
+
+	result.totalDurationWall = wall
+	result.totalDurationSummed = summedDuration
+
+	result.startedAt = start
+	result.scenarioResults = scenarioResults
+
+	return result
+}
+
 // --------------------------------------------------------------- PRIVATE HELPERS
 
 func evaluateGuard[TInput, TOutput any](
