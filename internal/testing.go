@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"foundation"
 	"foundation/entropy"
+	"foundation/formatting"
+	"slices"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -276,12 +279,49 @@ func injectPoisonPill[TInput, TOutput any](
 	}
 }
 
+// --------------------------------------------------------------- GROUPING METADATA
+
+type ZonePath struct {
+	parts []string
+}
+
+func ZonePathCreate(parts ...string) ZonePath {
+	return ZonePath{
+		parts: parts,
+	}
+}
+
+func ZonePathCreateFromString(path string, separator string) ZonePath {
+	parts := strings.Split(path, separator)
+	return ZonePathCreate(parts...)
+}
+
+/*
+Add appends one or multiple parts to the ZonePath, returning a new path.
+*/
+func (z ZonePath) Add(parts ...string) ZonePath {
+	return ZonePathCreate(slices.Concat(z.parts, parts)...)
+}
+
+/*
+Render renders the path using the provided separator.
+*/
+func (z ZonePath) Render(separator string) string {
+	return formatting.FormatStringSlice(z.parts, formatting.FormatSliceOptions[string]{
+		Separator: separator,
+		Prefix:    "",
+		Suffix:    "",
+	})
+}
+
 // --------------------------------------------------------------- SCENARIO
 
 type Executor[TInput, TOutput any] func(input TInput) (output TOutput, error error)
 
 type Scenario[TInput, TOutput any] struct {
 	name string
+
+	zonePath ZonePath
 
 	guards []Guard[TInput, TOutput]
 
@@ -292,10 +332,12 @@ func ScenarioCreate[TInput, TOutput any](
 	name string,
 	guards []Guard[TInput, TOutput],
 	executor Executor[TInput, TOutput],
+	zonePath ZonePath,
 ) Scenario[TInput, TOutput] {
 	return Scenario[TInput, TOutput]{
 		name:     name,
 		guards:   guards,
+		zonePath: zonePath,
 		executor: executor,
 	}
 }
@@ -345,6 +387,7 @@ type ScenarioRunResult struct {
 	// the run result is just how THIS endpoint models its result.
 	// this is therefore semantically different from how the engine will store it.
 	scenarioName string
+	zonePath     ZonePath
 
 	startedAt time.Time
 
@@ -413,6 +456,13 @@ func (s *ScenarioRunResult) SnapshotConfig() SnapshotConfig {
 }
 
 /*
+ZonePath returns the zonepath of the scenario at the time this was ran.
+*/
+func (s *ScenarioRunResult) ZonePath() ZonePath {
+	return s.zonePath
+}
+
+/*
 StartedAt returns when this scenario run started.
 */
 func (s *ScenarioRunResult) StartedAt() time.Time {
@@ -468,6 +518,7 @@ func ScenarioRun[TInput, TOutput any](
 			UseDuration:    config.UseDuration,
 			ProviderID:     entropyProviderID,
 		},
+		zonePath: scenario.zonePath,
 	}
 
 	start := time.Now()

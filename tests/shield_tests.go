@@ -60,6 +60,7 @@ func buildSumScenario() shield.SHIELD_Testing_Scenario[[]int, int] {
 
 			return counter, nil
 		},
+		[]string{"SHIELD", "Simple", "Sum"}...,
 	)
 }
 

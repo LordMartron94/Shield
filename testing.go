@@ -33,6 +33,38 @@ NOTE: In order for this to work properly, the generated input MUST be DETERMINIS
 type SHIELD_Testing_InputGenerator[TInput any] = internal.InputGenerator[TInput]
 
 /*
+SHIELD_Testing_ZonePath represents a zone (group) of scenarios.
+
+This can be treated as metadata and is not used by the execution engine.
+Only the rendering engine and/or downstream systems (can) make use of this.
+*/
+type SHIELD_Testing_ZonePath = internal.ZonePath
+
+/*
+SHIELD_Testing_ZonePathCreate builds a metadata zone path from ordered segment strings.
+
+Segments are preserved in order from outer to inner grouping (for example suite, then module).
+The execution engine ignores this path; storage, reports, or other tooling may use it to
+navigate or filter scenarios. Passing no parts yields an empty path, which is valid.
+*/
+func SHIELD_Testing_ZonePathCreate(parts ...string) SHIELD_Testing_ZonePath {
+	return internal.ZonePathCreate(parts...)
+}
+
+/*
+SHIELD_Testing_ZonePathCreateFromString parses a single string into a zone path using separator.
+
+Every substring between occurrences of separator becomes one segment; order matches the source
+left to right. For example ("a/b/c", "/") yields the same segments as ZonePathCreate("a", "b", "c").
+If path is empty, the result is one empty segment as produced by strings.Split. A non-empty path
+that contains no separator becomes a single-segment path. The separator is not trimmed from
+individual segments—normalize input if that matters for your tooling.
+*/
+func SHIELD_Testing_ZonePathCreateFromString(path string, separator string) SHIELD_Testing_ZonePath {
+	return internal.ZonePathCreateFromString(path, separator)
+}
+
+/*
 SHIELD_Testing_GuardPolicyMustNotPanic enforces a Phase 1 (Severity 0) hardware/state trap.
 
 If the executor panics, the Engine will catch it, fail the guard immediately,
@@ -166,14 +198,20 @@ It holds an array of guards to defend a piece of behaviour.
 type SHIELD_Testing_Scenario[TInput, TOutput any] = internal.Scenario[TInput, TOutput]
 
 /*
-SHIELD_Testing_ScenarioCreate constructs a single scenario to be ran.
+SHIELD_Testing_ScenarioCreate constructs a single scenario ready to run.
+
+Optional trailing zone arguments form the scenario's metadata ZonePath via
+SHIELD_Testing_ZonePathCreate (suite/module-style grouping). Omitted zones use an empty path.
+Execution does not consume zones; results and integrations expose them through ZonePath accessors.
 */
 func SHIELD_Testing_ScenarioCreate[TInput, TOutput any](
 	name string,
 	guards []SHIELD_Testing_Guard[TInput, TOutput],
 	executor SHIELD_Testing_Executor[TInput, TOutput],
+	zones ...string,
 ) SHIELD_Testing_Scenario[TInput, TOutput] {
-	return internal.ScenarioCreate(name, guards, executor)
+	zonePath := SHIELD_Testing_ZonePathCreate(zones...)
+	return internal.ScenarioCreate(name, guards, executor, zonePath)
 }
 
 /*

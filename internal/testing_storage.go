@@ -8,23 +8,26 @@ import (
 	"time"
 )
 
+const zonePathStorageSeparator = "."
+
 const (
 	testResultsTableName  = "test_results"
 	guardResultsTableName = "guard_results"
 
 	// Scenario Columns
-	colScenarioID     = "result_id"
-	colScenarioName   = "scenario_name"
-	colTimestamp      = "timestamp"
-	colPassed         = "passed"
-	colDurationWall   = "duration_wall"
-	colDurationSummed = "duration_summed"
-	colSeed           = "seed"
-	colFuzzingPattern = "fuzzing_pattern"
-	colMaxIterations  = "max_iterations"
-	colMaxDuration    = "max_duration"
-	colUseDuration    = "use_duration"
-	colProviderID     = "provider_id"
+	colScenarioID       = "result_id"
+	colScenarioName     = "scenario_name"
+	colScenarioZonePath = "zone_path"
+	colTimestamp        = "timestamp"
+	colPassed           = "passed"
+	colDurationWall     = "duration_wall"
+	colDurationSummed   = "duration_summed"
+	colSeed             = "seed"
+	colFuzzingPattern   = "fuzzing_pattern"
+	colMaxIterations    = "max_iterations"
+	colMaxDuration      = "max_duration"
+	colUseDuration      = "use_duration"
+	colProviderID       = "provider_id"
 
 	// Guard Columns
 	colGuardID              = "guard_result_id"
@@ -40,18 +43,19 @@ const (
 // --------------------------------------------------------------- ENTITIES
 
 type testResultEntity struct {
-	ResultID       string
-	ScenarioName   string
-	Timestamp      int64 // Unix milliseconds
-	Passed         int   // 0 or 1
-	DurationWall   int64 // Nanoseconds
-	DurationSummed int64 // Nanoseconds
-	Seed           string
-	FuzzingPattern int
-	MaxIterations  int64
-	MaxDuration    int64 // Nanoseconds
-	UseDuration    int   // 0 or 1
-	ProviderID     string
+	ResultID         string
+	ScenarioName     string
+	ScenarioZonePath string
+	Timestamp        int64 // Unix milliseconds
+	Passed           int   // 0 or 1
+	DurationWall     int64 // Nanoseconds
+	DurationSummed   int64 // Nanoseconds
+	Seed             string
+	FuzzingPattern   int
+	MaxIterations    int64
+	MaxDuration      int64 // Nanoseconds
+	UseDuration      int   // 0 or 1
+	ProviderID       string
 }
 
 type guardResultEntity struct {
@@ -134,6 +138,12 @@ func createTestResultsTableDef() persistence.SQLite3TableConfiguration[testResul
 			colScenarioName, persistence.SQLiteDataTypeText,
 			func(t *testResultEntity) any { return t.ScenarioName },
 			func(t *testResultEntity) any { return &t.ScenarioName },
+			persistence.SQLite3SchemaFieldOptionsFilterable(),
+		),
+		persistence.SQLite3SchemaFieldCreateManual(
+			colScenarioZonePath, persistence.SQLiteDataTypeText,
+			func(t *testResultEntity) any { return t.ScenarioZonePath },
+			func(t *testResultEntity) any { return &t.ScenarioZonePath },
 			persistence.SQLite3SchemaFieldOptionsFilterable(),
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
@@ -356,6 +366,7 @@ func mapEntityToScenario(scenario *testResultEntity, guards []*guardResultEntity
 
 	return &ScenarioRunResult{
 		scenarioName:        scenario.ScenarioName,
+		zonePath:            ZonePathCreateFromString(scenario.ScenarioZonePath, zonePathStorageSeparator),
 		totalDurationWall:   time.Duration(scenario.DurationWall),
 		totalDurationSummed: time.Duration(scenario.DurationSummed),
 		passed:              scenario.Passed == 1,
@@ -383,18 +394,19 @@ func mapScenarioToEntity(scenario ScenarioRunResult, scenarioID string) testResu
 	}
 
 	return testResultEntity{
-		ResultID:       scenarioID,
-		ScenarioName:   scenario.Name(),
-		Timestamp:      time.Now().UnixMilli(),
-		Passed:         passedInt,
-		DurationWall:   scenario.WallDuration().Nanoseconds(),
-		DurationSummed: scenario.SummedDuration().Nanoseconds(),
-		Seed:           cfg.Seed.String(),
-		FuzzingPattern: int(cfg.FuzzingPattern),
-		MaxIterations:  int64(cfg.MaxIterations),
-		MaxDuration:    cfg.MaxDuration.Nanoseconds(),
-		UseDuration:    useDurationInt,
-		ProviderID:     cfg.ProviderID,
+		ResultID:         scenarioID,
+		ScenarioName:     scenario.Name(),
+		ScenarioZonePath: scenario.zonePath.Render(zonePathStorageSeparator),
+		Timestamp:        time.Now().UnixMilli(),
+		Passed:           passedInt,
+		DurationWall:     scenario.WallDuration().Nanoseconds(),
+		DurationSummed:   scenario.SummedDuration().Nanoseconds(),
+		Seed:             cfg.Seed.String(),
+		FuzzingPattern:   int(cfg.FuzzingPattern),
+		MaxIterations:    int64(cfg.MaxIterations),
+		MaxDuration:      cfg.MaxDuration.Nanoseconds(),
+		UseDuration:      useDurationInt,
+		ProviderID:       cfg.ProviderID,
 	}
 }
 
