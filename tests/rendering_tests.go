@@ -3,6 +3,7 @@ package tests
 import (
 	"fmt"
 	"shield"
+	"shield/internal"
 	"testing"
 )
 
@@ -48,6 +49,101 @@ func TestShieldRendering(t *testing.T) {
 
 		// Print directly to stdout to bypass test-logger ANSI stripping
 		fmt.Println(output)
+	}
+}
+
+func TestShieldRegressionRendering(t *testing.T) {
+	// -------------------------------------------------------------------------
+	// 1. Synthesize Identical Regression Data
+	// -------------------------------------------------------------------------
+	identicalData := internal.RegressionResult{
+		IsRegression: true,
+		GuardDeltas: []internal.GuardRegressionDelta{
+			{
+				GuardName:      "Parse_Config_Malformed",
+				Severity:       internal.RegressionSeverity_OutcomeShift,
+				BaselinePassed: true,
+				TargetPassed:   false,
+				TargetIter:     0,
+				TargetReason:   "expected error, got none",
+			},
+			{
+				GuardName:      "Calculate_Trajectory",
+				Severity:       internal.RegressionSeverity_Degradation,
+				BaselinePassed: false,
+				TargetPassed:   false,
+				BaselineIter:   0,
+				TargetIter:     0,
+				BaselineReason: "expected 5.0, got 4.9",
+				TargetReason:   "unexpected panic: nil pointer dereference",
+			},
+			{
+				GuardName:      "Fuzz_Hash_Collision",
+				Severity:       internal.RegressionSeverity_FragilityShift,
+				BaselinePassed: false,
+				TargetPassed:   false,
+				BaselineIter:   95000,
+				TargetIter:     12,
+				BaselineReason: "collision detected",
+				TargetReason:   "collision detected",
+			},
+			{
+				GuardName:      "Network_Timeout",
+				Severity:       internal.RegressionSeverity_Improvement,
+				BaselinePassed: false,
+				TargetPassed:   true,
+				BaselineIter:   4,
+				BaselineReason: "deadline exceeded",
+			},
+		},
+	}
+
+	// -------------------------------------------------------------------------
+	// 2. Synthesize Stability Regression Data
+	// -------------------------------------------------------------------------
+	stabilityData := internal.StabilityRegressionResult{
+		IsRegression: true,
+		Severity:     internal.RegressionSeverity_OutcomeShift,
+		Reason:       "Statistically significant failure rate increase (p=0.0124). Rate shifted from 2.00% to 14.00%",
+		Baseline: internal.StabilityStats{
+			TotalRuns:         500,
+			FailedRuns:        10,
+			FailureRate:       0.02,
+			AverageFailedIter: 85000,
+		},
+		Target: internal.StabilityStats{
+			TotalRuns:         500,
+			FailedRuns:        70,
+			FailureRate:       0.14,
+			AverageFailedIter: 12000,
+		},
+	}
+
+	// -------------------------------------------------------------------------
+	// 3. Render Across Modes
+	// -------------------------------------------------------------------------
+	modes := []struct {
+		name string
+		mode internal.RenderingColorMode
+	}{
+		{"TrueColor (24-bit)", internal.Render_Color_True},
+		{"ANSI16 (4-bit)", internal.Render_Color_ANSI16},
+		{"None (Plaintext)", internal.Render_Color_None},
+	}
+
+	for _, tc := range modes {
+		fmt.Printf("\n\n========================================\n")
+		fmt.Printf(" MODE: %s\n", tc.name)
+		fmt.Printf("========================================\n\n")
+
+		cfg := internal.RenderingConfigurationCreate(tc.mode)
+		renderer := internal.RendererCreate(cfg)
+
+		// 1. Identical Output
+		fmt.Println(internal.RenderIdenticalRegression(renderer, identicalData))
+
+		// 2. Stability Output
+		fmt.Println(internal.RenderStabilityRegression(renderer, stabilityData))
 	}
 }
 

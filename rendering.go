@@ -40,7 +40,9 @@ func SHIELD_Rendering_ConfigurationCreate(
 }
 
 /*
-SHIELD_Rendering_Renderer fronts fixed palette tables queried by SHIELD_Rendering_FormatScenarioRunResults.
+SHIELD_Rendering_Renderer fronts fixed palette tables for SHIELD_Rendering_FormatScenarioRunResults,
+
+SHIELD_Rendering_FormatIdenticalRegressionReport, and SHIELD_Rendering_FormatStabilityRegressionReport.
 
 Construct exclusively via SHIELD_Rendering_RendererCreate; renderer identity is concurrency-safe across format calls because palettes are immutable and each invocation owns its scratch builder memory.
 */
@@ -73,4 +75,48 @@ func SHIELD_Rendering_FormatScenarioRunResults(
 	scenarios []SHIELD_Testing_ScenarioRunResult,
 ) string {
 	return internal.RenderScenarios(renderer, scenarios)
+}
+
+/*
+SHIELD_Rendering_FormatIdenticalRegressionReport turns a pairwise SHIELD_Regression_Result from
+
+SHIELD_Regression_CheckIdentical (or Storage twin) into a terminal-oriented summary.
+
+Outputs a labelled header (“SHIELD IDENTICAL REGRESSION REPORT”), pass/fail verdict coloring
+
+(STABLE / IMPROVED versus REGRESSION DETECTED from IsRegression), then either a muted “no deltas” sentence
+
+when GuardDeltas is empty or—for each retained delta—severity token, guard name,
+
+and indented baseline/target PASS versus FAIL rows with fuzz iteration snippets and stitched reason strings.
+
+Improvement deltas use pass hues; regressing severities use fail hues; severity None deltas use muted styling if ever present.
+
+Does not reorder report fields or mutate RegressionResult; purely allocates through strings.Builder wiring.
+
+renderer must come from SHIELD_Rendering_RendererCreate (nil dereferences internally).
+*/
+func SHIELD_Rendering_FormatIdenticalRegressionReport(
+	renderer *SHIELD_Rendering_Renderer,
+	report SHIELD_Regression_Result,
+) string {
+	return internal.RenderIdenticalRegression(renderer, report)
+}
+
+/*
+SHIELD_Rendering_FormatStabilityRegressionReport formats StabilityRegressionResult from SHIELD_Regression_CheckStability
+
+(or Storage hydrator): cohort verdict line, enumerated Severity plus Reason excerpt, then a fixed-width baseline→target projection listing total runs, failure-rate percentages with conditional fail highlights
+
+when the target rate strictly exceeds baseline, and mean earliest-failing iteration (“Mean Fragility”) with conditional fail highlights
+
+when targets fail sooner on average while the target cohort recorded failures.
+
+Pure string emission only—no mutation of StabilityRegressionResult. renderer wiring constraints match the other rendering entry points.
+*/
+func SHIELD_Rendering_FormatStabilityRegressionReport(
+	renderer *SHIELD_Rendering_Renderer,
+	report SHIELD_Regression_Stability_Result,
+) string {
+	return internal.RenderStabilityRegression(renderer, report)
 }

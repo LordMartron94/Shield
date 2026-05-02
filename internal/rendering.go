@@ -150,6 +150,129 @@ func RenderScenarios(renderer *Renderer, scenarios []ScenarioRunResult) string {
 	return builder.String()
 }
 
+func RenderIdenticalRegression(renderer *Renderer, regression RegressionResult) string {
+	builder := &strings.Builder{}
+
+	renderer.WriteColor(builder, ColorHeader)
+	builder.WriteString("=== SHIELD IDENTICAL REGRESSION REPORT ===\n")
+	renderer.WriteColor(builder, ColorReset)
+
+	if regression.IsRegression {
+		renderer.WriteColor(builder, ColorFail)
+		builder.WriteString("Verdict: REGRESSION DETECTED\n\n")
+	} else {
+		renderer.WriteColor(builder, ColorPass)
+		builder.WriteString("Verdict: STABLE / IMPROVED\n\n")
+	}
+	renderer.WriteColor(builder, ColorReset)
+
+	if len(regression.GuardDeltas) == 0 {
+		renderer.WriteColor(builder, ColorMuted)
+		builder.WriteString("No significant guard deltas detected.\n")
+		renderer.WriteColor(builder, ColorReset)
+		return builder.String()
+	}
+
+	for _, delta := range regression.GuardDeltas {
+		// 1. Determine Semantic Color
+		c := ColorMuted
+		switch delta.Severity {
+		case RegressionSeverity_Improvement:
+			c = ColorPass
+		case RegressionSeverity_OutcomeShift, RegressionSeverity_Degradation, RegressionSeverity_FragilityShift:
+			c = ColorFail
+		}
+
+		// 2. Render Header
+		renderer.WriteColor(builder, c)
+		builder.WriteString(fmt.Sprintf("[%s] ", delta.Severity))
+		renderer.WriteColor(builder, ColorReset)
+		builder.WriteString(delta.GuardName)
+		builder.WriteString("\n")
+
+		// 3. Render Baseline State
+		builder.WriteString("  Baseline: ")
+		if delta.BaselinePassed {
+			renderer.WriteColor(builder, ColorPass)
+			builder.WriteString("PASS\n")
+		} else {
+			renderer.WriteColor(builder, ColorFail)
+			builder.WriteString(fmt.Sprintf("FAIL (Iter: %d) - %s\n", delta.BaselineIter, delta.BaselineReason))
+		}
+		renderer.WriteColor(builder, ColorReset)
+
+		// 4. Render Target State
+		builder.WriteString("  Target:   ")
+		if delta.TargetPassed {
+			renderer.WriteColor(builder, ColorPass)
+			builder.WriteString("PASS\n")
+		} else {
+			renderer.WriteColor(builder, ColorFail)
+			builder.WriteString(fmt.Sprintf("FAIL (Iter: %d) - %s\n", delta.TargetIter, delta.TargetReason))
+		}
+		renderer.WriteColor(builder, ColorReset)
+		builder.WriteString("\n")
+	}
+
+	return builder.String()
+}
+
+func RenderStabilityRegression(renderer *Renderer, regression StabilityRegressionResult) string {
+	builder := &strings.Builder{}
+
+	renderer.WriteColor(builder, ColorHeader)
+	builder.WriteString("=== SHIELD STABILITY REGRESSION REPORT ===\n")
+	renderer.WriteColor(builder, ColorReset)
+
+	if regression.IsRegression {
+		renderer.WriteColor(builder, ColorFail)
+		builder.WriteString("Verdict: REGRESSION DETECTED\n")
+	} else {
+		renderer.WriteColor(builder, ColorPass)
+		builder.WriteString("Verdict: STABLE\n")
+	}
+	renderer.WriteColor(builder, ColorReset)
+
+	renderer.WriteColor(builder, ColorMuted)
+	builder.WriteString(fmt.Sprintf("Severity: %s\n", regression.Severity))
+	builder.WriteString(fmt.Sprintf("Reason:   %s\n\n", regression.Reason))
+	renderer.WriteColor(builder, ColorReset)
+
+	// Tabular Stats Projection
+	b := regression.Baseline
+	t := regression.Target
+
+	renderer.WriteColor(builder, ColorMuted)
+	builder.WriteString(fmt.Sprintf("%-16s %12s -> %12s\n", "", "Baseline", "Target"))
+	renderer.WriteColor(builder, ColorReset)
+
+	builder.WriteString(fmt.Sprintf("%-16s %12d -> %12d\n", "Total Runs:", b.TotalRuns, t.TotalRuns))
+
+	// Failure Rate Formatting
+	builder.WriteString(fmt.Sprintf("%-16s ", "Failure Rate:"))
+	rateStr := fmt.Sprintf("%11.2f%% -> %11.2f%%\n", b.FailureRate*100, t.FailureRate*100)
+	if t.FailureRate > b.FailureRate {
+		renderer.WriteColor(builder, ColorFail)
+		builder.WriteString(rateStr)
+		renderer.WriteColor(builder, ColorReset)
+	} else {
+		builder.WriteString(rateStr)
+	}
+
+	// Fragility Formatting
+	builder.WriteString(fmt.Sprintf("%-16s ", "Mean Fragility:"))
+	iterStr := fmt.Sprintf("%12d -> %12d\n", b.AverageFailedIter, t.AverageFailedIter)
+	if t.AverageFailedIter < b.AverageFailedIter && t.FailedRuns > 0 {
+		renderer.WriteColor(builder, ColorFail) // Dropping iterations means it breaks faster (worse)
+		builder.WriteString(iterStr)
+		renderer.WriteColor(builder, ColorReset)
+	} else {
+		builder.WriteString(iterStr)
+	}
+
+	return builder.String()
+}
+
 // ---------------------------------------------------------------- PRIVATE HELPERS
 
 func renderTreeIllusion(b *strings.Builder, r *Renderer, scenarios []ScenarioRunResult) {
