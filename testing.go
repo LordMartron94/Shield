@@ -1,6 +1,9 @@
 package shield
 
 import (
+	"fmt"
+	"foundation"
+	"foundation/entropy"
 	"shield/internal"
 )
 
@@ -11,6 +14,7 @@ Features:
 - Data-Driven Testing Setup
 - Fuzzing system
 - Operation-scoped lifecycle with deferred teardown; framework panics become synthetic ScenarioRunResults
+- Snapshot-driven ScenarioRunConfig reconstruction and SQLite-backed replays (`SHIELD_Testing_ScenarioRunReplay*` / `*_FromSnapshot`)
 */
 
 /*
@@ -25,6 +29,17 @@ type SHIELD_Testing_GuardPolicy[TOutput any] = internal.GuardPolicy[TOutput]
 SHIELD_Testing_ScenarioRunConfig sets runtime configuration for a scenario.
 */
 type SHIELD_Testing_ScenarioRunConfig = internal.ScenarioRunConfig
+
+/*
+SHIELD_Testing_SnapshotConfig is the immutable fuzzing snapshot carried by ScenarioRunResult.SnapshotConfig().
+
+# It records the seed, fuzzing pattern, effort bounds, whether limits are iteration- or duration-based, and the entropy
+
+provider label string attached to that run. Storage round-trips these fields; replay helpers translate them into
+
+SHIELD_Testing_ScenarioRunConfig via SHIELD_Testing_ScenarioRunConfigFromSnapshot.
+*/
+type SHIELD_Testing_SnapshotConfig = internal.SnapshotConfig
 
 /*
 SHIELD_Testing_InputGenerator generates an input based on a seed and iteration number.
@@ -223,6 +238,73 @@ func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
 	runConfig SHIELD_Testing_ScenarioRunConfig,
 ) SHIELD_Testing_ScenarioRunResult {
 	return internal.ScenarioRun(scenario, runConfig)
+}
+
+/*
+SHIELD_Testing_ScenarioRunConfigFromSnapshot materializes a runnable config from a prior SnapshotConfig.
+
+# SeedOverride receives snapshot.Seed so ScenarioRun matches the stored trajectory when combined with the same
+
+entropy factory semantics. FuzzingPattern, MaxIterations or MaxDuration, and UseDuration copy across directly.
+
+entropyProviderFactory is stored on ScenarioRunConfig unchanged; nil keeps SHIELD’s default MixSplit128 provider while
+
+still fixing the seed. SnapshotConfig.ProviderID is diagnostic metadata only—bit-identical entropy plumbing versus the
+
+original run requires the caller to supply a factory that honors that identifier if their pipeline depends on it.
+*/
+func SHIELD_Testing_ScenarioRunConfigFromSnapshot(
+	snapshot SHIELD_Testing_SnapshotConfig,
+	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
+) SHIELD_Testing_ScenarioRunConfig {
+	return internal.ScenarioRunConfigFromSnapshot(snapshot, entropyProviderFactory)
+}
+
+/*
+SHIELD_Testing_ScenarioRunReplayFromStoredAggregate replays scenario using the snapshot embedded in a persisted row
+
+(or any hydrated aggregate) without touching SQLite again.
+
+stored must be non-nil. entropyProviderFactory follows SHIELD_Testing_ScenarioRunConfigFromSnapshot.
+
+# The callable scenario definition (guards, executor, zone metadata) is supplied independently—this only reapplies knobs
+
+from stored.SnapshotConfig(). Mismatch between scenario and stored scenario name / shape is intentionally allowed so
+
+callers can bisect behavioural changes deliberately.
+*/
+func SHIELD_Testing_ScenarioRunReplayFromStoredAggregate[TInput, TOutput any](
+	scenario SHIELD_Testing_Scenario[TInput, TOutput],
+	stored *SHIELD_Testing_ScenarioRunResult,
+	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
+) (SHIELD_Testing_ScenarioRunResult, error) {
+	if stored == nil {
+		var zero SHIELD_Testing_ScenarioRunResult
+		return zero, fmt.Errorf("stored scenario aggregate is nil")
+	}
+	runConfig := internal.ScenarioRunConfigFromSnapshot(stored.SnapshotConfig(), entropyProviderFactory)
+	return internal.ScenarioRun(scenario, runConfig), nil
+}
+
+/*
+SHIELD_Testing_ScenarioRunReplayFromStorageByID hydrates persistedResultID via SHIELD_Testing_Storage_ScenarioResultFindByID,
+
+then invokes SHIELD_Testing_ScenarioRunReplayFromStoredAggregate with the fetched row.
+
+Storage errors propagate; the replay result reflects a fresh ScenarioRun invocation under the revived configuration.
+*/
+func SHIELD_Testing_ScenarioRunReplayFromStorageByID[TInput, TOutput any](
+	engine *SHIELD_Testing_Storage_Engine,
+	persistedResultID string,
+	scenario SHIELD_Testing_Scenario[TInput, TOutput],
+	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
+) (SHIELD_Testing_ScenarioRunResult, error) {
+	row, err := SHIELD_Testing_Storage_ScenarioResultFindByID(engine, persistedResultID)
+	if err != nil {
+		var zero SHIELD_Testing_ScenarioRunResult
+		return zero, err
+	}
+	return SHIELD_Testing_ScenarioRunReplayFromStoredAggregate(scenario, row, entropyProviderFactory)
 }
 
 /*

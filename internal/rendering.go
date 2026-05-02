@@ -130,6 +130,7 @@ func RenderScenarios(renderer *Renderer, scenarios []ScenarioRunResult) string {
 	renderer.WriteColor(builder, ColorReset)
 
 	renderer.WriteColor(builder, ColorMuted)
+	builder.WriteString(fmt.Sprintf("Executed:  %s\n", scenarios[0].StartedAt().Format(time.DateTime)))
 	builder.WriteString(fmt.Sprintf("Scenarios: %d Total | ", total))
 	renderer.WriteColor(builder, ColorReset)
 
@@ -165,6 +166,13 @@ func RenderIdenticalRegression(renderer *Renderer, regression RegressionResult) 
 		builder.WriteString("Verdict: STABLE / IMPROVED\n\n")
 	}
 	renderer.WriteColor(builder, ColorReset)
+
+	if len(regression.Sources) > 0 {
+		renderer.WriteColor(builder, ColorMuted)
+		builder.WriteString(fmt.Sprintf("Baseline: %s\n", regression.Sources[0].StartedAt().Format(time.DateTime)))
+		builder.WriteString(fmt.Sprintf("Target:   %s\n\n", regression.Sources[1].StartedAt().Format(time.DateTime)))
+		renderer.WriteColor(builder, ColorReset)
+	}
 
 	if len(regression.GuardDeltas) == 0 {
 		renderer.WriteColor(builder, ColorMuted)

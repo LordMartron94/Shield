@@ -481,6 +481,20 @@ type ScenarioRunConfig struct {
 	UseDuration   bool
 }
 
+func ScenarioRunConfigFromSnapshot(
+	snapshot SnapshotConfig,
+	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
+) ScenarioRunConfig {
+	return ScenarioRunConfig{
+		SeedOverride:           &snapshot.Seed,
+		FuzzingPattern:         snapshot.FuzzingPattern,
+		MaxIterations:          snapshot.MaxIterations,
+		MaxDuration:            snapshot.MaxDuration,
+		UseDuration:            snapshot.UseDuration,
+		EntropyProviderFactory: entropyProviderFactory,
+	}
+}
+
 func ScenarioRun[TInput, TOutput any](
 	scenario Scenario[TInput, TOutput],
 	config ScenarioRunConfig,
