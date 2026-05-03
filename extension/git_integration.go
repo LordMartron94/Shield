@@ -66,6 +66,23 @@ func SystemIdentityFromMarker(environment string, markerFunc any) (shield.SHIELD
 	return SystemIdentityFromGit(environment, targetDir)
 }
 
+/*
+SystemIdentityFromCaller retrieves the system identity by inspecting the physical location
+of the file that called this function. This is the preferred method for test suites, as it
+automatically binds the identity to the submodule containing the test file.
+*/
+func SystemIdentityFromCaller(environment string) (shield.SHIELD_Testing_SystemIdentity, error) {
+	// Skip 1 frame to get the file of the caller, not this extension function
+	_, file, _, ok := runtime.Caller(1)
+	if !ok {
+		return shield.SHIELD_Testing_SystemIdentity{}, errors.New("shield extension: could not determine caller location")
+	}
+
+	targetDir := filepath.Dir(file)
+
+	return SystemIdentityFromGit(environment, targetDir)
+}
+
 // ----------------------------------------------------------------- PRIVATE HELPERS
 
 func resolveGitHash(targetPath string) (string, error) {
