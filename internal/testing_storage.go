@@ -400,14 +400,18 @@ func TestResultDatabaseScenarioResultFindByIdentity(
 
 // --------------------------------------------------------------- DISCOVERY
 
-// CohortVersionRecord is one DISTINCT persisted Version label for a scenario_name + environment cohort: LastSeen mirrors MAX(row_timestamp) and RunCount counts associated rows independent of pass/fail verdicts.
+/*
+CohortVersionRecord is one DISTINCT persisted Version label for a scenario_name + environment cohort: LastSeen mirrors MAX(row_timestamp) and RunCount counts associated rows independent of pass/fail verdicts.
+*/
 type CohortVersionRecord struct {
 	Version  string
 	LastSeen time.Time
 	RunCount int
 }
 
-// TestResultDatabaseGetCohortVersions groups SQLite rows by Version, orders groups by descending MAX(timestamp), and caps DISTINCT results with limit (SQL semantics: limit ≤0 usually returns empty).
+/*
+TestResultDatabaseGetCohortVersions groups SQLite rows by Version, orders groups by descending MAX(timestamp), and caps DISTINCT results with limit (SQL semantics: limit ≤0 usually returns empty).
+*/
 func TestResultDatabaseGetCohortVersions(
 	db *TestResultDatabase,
 	name string,

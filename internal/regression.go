@@ -258,7 +258,9 @@ func checkFragilityDegradation(baseIters, tgtIters []float64, confidenceLevel fl
 	return isSignificant, mwuResult.PValue
 }
 
-// validateIdenticalSignatures enforces pairwise determinism prerequisites: fuzz snapshot fields plus Identity.Environment parity (Version deliberate mismatch allowed).
+/*
+validateIdenticalSignatures enforces pairwise determinism prerequisites: fuzz snapshot fields plus Identity.Environment parity (Version deliberate mismatch allowed).
+*/
 func validateIdenticalSignatures(base SnapshotConfig, tgt SnapshotConfig) error {
 	if base.Seed != tgt.Seed {
 		return fmt.Errorf("invalid comparison: seed mismatch (%s vs %s)", base.Seed.String(), tgt.Seed.String())
@@ -298,8 +300,11 @@ func validateCohortPurity(runs []ScenarioRunResult, cohortName string) error {
 	return nil
 }
 
-// compareGuards pairs by guard name with baseline as the driver: missing target rows become OutcomeShift;
-// left-over target-only guards are ignored. Per-pair logic is evaluateGuardDelta.
+/*
+compareGuards pairs by guard name with baseline as the driver: missing target rows become OutcomeShift;
+
+left-over target-only guards are ignored. Per-pair logic is evaluateGuardDelta.
+*/
 func compareGuards(baseGuards []GuardEvaluationResult, tgtGuards []GuardEvaluationResult) []GuardRegressionDelta {
 	tgtMap := make(map[string]GuardEvaluationResult, len(tgtGuards))
 	for _, g := range tgtGuards {
@@ -334,8 +339,11 @@ func compareGuards(baseGuards []GuardEvaluationResult, tgtGuards []GuardEvaluati
 	return deltas
 }
 
-// evaluateGuardDelta classifies a name-aligned pair. After pass/fail handling, both-fail cases compare
-// FailureReason() strings first (divergence → FailureDegradation), then earlier target failure iteration (FragilityIncrease).
+/*
+evaluateGuardDelta classifies a name-aligned pair. After pass/fail handling, both-fail cases compare
+
+FailureReason() strings first (divergence → FailureDegradation), then earlier target failure iteration (FragilityIncrease).
+*/
 func evaluateGuardDelta(base GuardEvaluationResult, tgt GuardEvaluationResult) GuardRegressionDelta {
 	delta := GuardRegressionDelta{
 		GuardName:      tgt.Name(),

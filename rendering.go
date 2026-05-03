@@ -17,10 +17,14 @@ const (
 	SHIELD_Rendering_Color_True   SHIELD_Rendering_ColorMode = internal.Render_Color_True
 )
 
-// SHIELD_Rendering_Configuration binds SHIELD_Rendering_RendererCreate inputs; today it only snapshots ColorMode for forward-compatible extension.
+/*
+SHIELD_Rendering_Configuration binds SHIELD_Rendering_RendererCreate inputs; today it only snapshots ColorMode for forward-compatible extension.
+*/
 type SHIELD_Rendering_Configuration = internal.RenderingConfiguration
 
-// SHIELD_Rendering_ConfigurationCreate builds config; colorMode chooses palettes, with unknown values degrading to SHIELD_Rendering_Color_None semantics.
+/*
+SHIELD_Rendering_ConfigurationCreate builds config; colorMode chooses palettes, with unknown values degrading to SHIELD_Rendering_Color_None semantics.
+*/
 func SHIELD_Rendering_ConfigurationCreate(
 	colorMode SHIELD_Rendering_ColorMode,
 ) *SHIELD_Rendering_Configuration {
@@ -36,7 +40,9 @@ post-create palettes never mutate and strings.Builder scratch stays per call (or
 */
 type SHIELD_Rendering_Renderer = internal.Renderer
 
-// SHIELD_Rendering_RendererCreate maps cfg into a Renderer with matching palette routing; cfg must be non-nil.
+/*
+SHIELD_Rendering_RendererCreate maps cfg into a Renderer with matching palette routing; cfg must be non-nil.
+*/
 func SHIELD_Rendering_RendererCreate(cfg *SHIELD_Rendering_Configuration) *SHIELD_Rendering_Renderer {
 	return internal.RendererCreate(cfg)
 }

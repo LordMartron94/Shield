@@ -55,7 +55,9 @@ storage identity queries and cohort statistics require homogeneous env+Version s
 */
 type SHIELD_Testing_SystemIdentity = internal.SystemIdentity
 
-// SHIELD_Testing_ZonePathCreate stitches ordered zone segments into a metadata path (empty parts remain valid sentinel paths).
+/*
+SHIELD_Testing_ZonePathCreate stitches ordered zone segments into a metadata path (empty parts remain valid sentinel paths).
+*/
 func SHIELD_Testing_ZonePathCreate(parts ...string) SHIELD_Testing_ZonePath {
 	return internal.ZonePathCreate(parts...)
 }
@@ -69,22 +71,30 @@ func SHIELD_Testing_ZonePathCreateFromString(path string, separator string) SHIE
 	return internal.ZonePathCreateFromString(path, separator)
 }
 
-// SHIELD_Testing_GuardPolicyMustNotPanic traps unexpected panics as guard failures with recovered diagnostics.
+/*
+SHIELD_Testing_GuardPolicyMustNotPanic traps unexpected panics as guard failures with recovered diagnostics.
+*/
 func SHIELD_Testing_GuardPolicyMustNotPanic[TOutput any]() SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyMustNotPanic[TOutput]()
 }
 
-// SHIELD_Testing_GuardPolicyMustPanic expects panics; normal returns or errors fail the guard.
+/*
+SHIELD_Testing_GuardPolicyMustPanic expects panics; normal returns or errors fail the guard.
+*/
 func SHIELD_Testing_GuardPolicyMustPanic[TOutput any]() SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyMustPanic[TOutput]()
 }
 
-// SHIELD_Testing_GuardPolicyMustNotError fails when executors return non-nil errors (post-panic phase).
+/*
+SHIELD_Testing_GuardPolicyMustNotError fails when executors return non-nil errors (post-panic phase).
+*/
 func SHIELD_Testing_GuardPolicyMustNotError[TOutput any]() SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyMustNotError[TOutput]()
 }
 
-// SHIELD_Testing_GuardPolicyMustError forces a non-nil Go error from the executor.
+/*
+SHIELD_Testing_GuardPolicyMustError forces a non-nil Go error from the executor.
+*/
 func SHIELD_Testing_GuardPolicyMustError[TOutput any]() SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyMustError[TOutput]()
 }
@@ -113,14 +123,18 @@ func SHIELD_Testing_GuardPolicyMustEqual[TOutput any](
 	return internal.GuardPolicyMustEqual(comparator, formatter, expected)
 }
 
-// SHIELD_Testing_GuardPolicyPredicate provides arbitrary property checks returning pass/fail plus textual rationale.
+/*
+SHIELD_Testing_GuardPolicyPredicate provides arbitrary property checks returning pass/fail plus textual rationale.
+*/
 func SHIELD_Testing_GuardPolicyPredicate[TOutput any](
 	predicate func(actual TOutput) (passed bool, reason string),
 ) SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyPredicate(predicate)
 }
 
-// SHIELD_Testing_Guard binds policies to generated inputs for a named defensive claim.
+/*
+SHIELD_Testing_Guard binds policies to generated inputs for a named defensive claim.
+*/
 type SHIELD_Testing_Guard[TInput, TOutput any] = internal.Guard[TInput, TOutput]
 
 /*
@@ -146,13 +160,19 @@ func SHIELD_Testing_GuardCreate_Fuzzed[TInput, TOutput any](
 	return internal.GuardCreate(name, inputGenerator, true, policies...)
 }
 
-// SHIELD_Testing_Executor is Scenario-scoped runnable logic feeding guard evaluation.
+/*
+SHIELD_Testing_Executor is Scenario-scoped runnable logic feeding guard evaluation.
+*/
 type SHIELD_Testing_Executor[TInput, TOutput any] = internal.Executor[TInput, TOutput]
 
-// SHIELD_Testing_ScenarioRunResult captures telemetry for one Scenario invocation.
+/*
+SHIELD_Testing_ScenarioRunResult captures telemetry for one Scenario invocation.
+*/
 type SHIELD_Testing_ScenarioRunResult = internal.ScenarioRunResult
 
-// SHIELD_Testing_Scenario groups guards protecting a single executor under Scenario metadata (name + zone path).
+/*
+SHIELD_Testing_Scenario groups guards protecting a single executor under Scenario metadata (name + zone path).
+*/
 type SHIELD_Testing_Scenario[TInput, TOutput any] = internal.Scenario[TInput, TOutput]
 
 /*
@@ -168,7 +188,9 @@ func SHIELD_Testing_ScenarioCreate[TInput, TOutput any](
 	return internal.ScenarioCreate(name, guards, executor, zonePath)
 }
 
-// SHIELD_Testing_ScenarioRun executes scenario honoring runConfig including mandatory Identity; invalid Identity triggers engine panic messaging.
+/*
+SHIELD_Testing_ScenarioRun executes scenario honoring runConfig including mandatory Identity; invalid Identity triggers engine panic messaging.
+*/
 func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
 	scenario SHIELD_Testing_Scenario[TInput, TOutput],
 	runConfig SHIELD_Testing_ScenarioRunConfig,
@@ -232,7 +254,9 @@ defer’d teardown executes even when inner batches panic internally, emitting s
 */
 type SHIELD_Testing_Operation[TState any] = internal.Operation[TState]
 
-// SHIELD_Testing_OperationRunResult aggregates nested Scenario summaries plus framing synthetic rows on framework anomalies.
+/*
+SHIELD_Testing_OperationRunResult aggregates nested Scenario summaries plus framing synthetic rows on framework anomalies.
+*/
 type SHIELD_Testing_OperationRunResult = internal.OperationRunResult
 
 /*
@@ -249,7 +273,9 @@ func SHIELD_Testing_OperationCreate[TState any](
 	return internal.OperationCreate(name, zonePath, startup, teardown, runScenarios)
 }
 
-// SHIELD_Testing_OperationRun executes guarded startup/scenario/teardown choreography returning OperationRun aggregates without bubbling panics to callers.
+/*
+SHIELD_Testing_OperationRun executes guarded startup/scenario/teardown choreography returning OperationRun aggregates without bubbling panics to callers.
+*/
 func SHIELD_Testing_OperationRun[TState any](operation *SHIELD_Testing_Operation[TState]) SHIELD_Testing_OperationRunResult {
 	return internal.OperationRun(operation)
 }

@@ -28,7 +28,9 @@ func slicesFromStoredScenarioPointers(
 	return out, nil
 }
 
-// SHIELD_Regression_Severity enumerates guard or population change classes; string forms mirror persisted RegressionSeverity constants.
+/*
+SHIELD_Regression_Severity enumerates guard or population change classes; string forms mirror persisted RegressionSeverity constants.
+*/
 type SHIELD_Regression_Severity = internal.RegressionSeverity
 
 /*

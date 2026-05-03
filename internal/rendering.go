@@ -23,7 +23,9 @@ const (
 	colorCount // Automatically sized based on the iota length
 )
 
-// The Palettes are static, contiguous arrays. Zero map lookups.
+/*
+The Palettes are static, contiguous arrays. Zero map lookups.
+*/
 var paletteNone = [colorCount][]byte{
 	ColorReset:     {},
 	ColorPass:      {},

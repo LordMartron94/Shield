@@ -316,8 +316,11 @@ func (z ZonePath) Render(separator string) string {
 
 // --------------------------------------------------------------- SCENARIO
 
-// SystemIdentity tags who produced a ScenarioRun snapshot: logical deployment tier (Environment) plus build/software Version.
-// Both strings must be non-empty before ScenarioRun accepts a ScenarioRunConfig; they persist through storage and regressions compare environments for identical runs while stability cohorts require homogeneous env+version.
+/*
+SystemIdentity tags who produced a ScenarioRun snapshot: logical deployment tier (Environment) plus build/software Version.
+
+Both strings must be non-empty before ScenarioRun accepts a ScenarioRunConfig; they persist through storage and regressions compare environments for identical runs while stability cohorts require homogeneous env+version.
+*/
 type SystemIdentity struct {
 	Version     string
 	Environment string
