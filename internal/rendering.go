@@ -249,10 +249,12 @@ func RenderStabilityRegression(renderer *Renderer, regression StabilityRegressio
 	builder.WriteString(fmt.Sprintf("Reason:   %s\n\n", regression.Reason))
 
 	if !b.EarliestRun.IsZero() && !b.LatestRun.IsZero() {
-		builder.WriteString(fmt.Sprintf("Baseline Span: %s to %s\n", b.EarliestRun.Format(time.DateTime), b.LatestRun.Format(time.DateTime)))
+		span := formatTemporalSpan(b.LatestRun.Sub(b.EarliestRun))
+		builder.WriteString(fmt.Sprintf("Baseline Span: %s to %s %s\n", b.EarliestRun.Format(time.DateTime), b.LatestRun.Format(time.DateTime), span))
 	}
 	if !t.EarliestRun.IsZero() && !t.LatestRun.IsZero() {
-		builder.WriteString(fmt.Sprintf("Target Span:   %s to %s\n", t.EarliestRun.Format(time.DateTime), t.LatestRun.Format(time.DateTime)))
+		span := formatTemporalSpan(t.LatestRun.Sub(t.EarliestRun))
+		builder.WriteString(fmt.Sprintf("Target Span:   %s to %s %s\n", t.EarliestRun.Format(time.DateTime), t.LatestRun.Format(time.DateTime), span))
 	}
 	builder.WriteString("\n")
 
@@ -353,4 +355,20 @@ func renderTreeIllusion(b *strings.Builder, r *Renderer, scenarios []ScenarioRun
 
 		prevPath = currPath
 	}
+}
+
+func formatTemporalSpan(d time.Duration) string {
+	d = d.Round(time.Minute)
+
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+
+	if days > 0 {
+		return fmt.Sprintf("(%dd %dh %dm)", days, hours, minutes)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("(%dh %dm)", hours, minutes)
+	}
+	return fmt.Sprintf("(%dm)", minutes)
 }
