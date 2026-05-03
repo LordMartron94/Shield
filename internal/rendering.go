@@ -228,6 +228,9 @@ func RenderIdenticalRegression(renderer *Renderer, regression RegressionResult) 
 func RenderStabilityRegression(renderer *Renderer, regression StabilityRegressionResult) string {
 	builder := &strings.Builder{}
 
+	b := regression.Baseline
+	t := regression.Target
+
 	renderer.WriteColor(builder, ColorHeader)
 	builder.WriteString("=== SHIELD STABILITY REGRESSION REPORT ===\n")
 	renderer.WriteColor(builder, ColorReset)
@@ -244,12 +247,18 @@ func RenderStabilityRegression(renderer *Renderer, regression StabilityRegressio
 	renderer.WriteColor(builder, ColorMuted)
 	builder.WriteString(fmt.Sprintf("Severity: %s\n", regression.Severity))
 	builder.WriteString(fmt.Sprintf("Reason:   %s\n\n", regression.Reason))
+
+	if !b.EarliestRun.IsZero() && !b.LatestRun.IsZero() {
+		builder.WriteString(fmt.Sprintf("Baseline Span: %s to %s\n", b.EarliestRun.Format(time.DateTime), b.LatestRun.Format(time.DateTime)))
+	}
+	if !t.EarliestRun.IsZero() && !t.LatestRun.IsZero() {
+		builder.WriteString(fmt.Sprintf("Target Span:   %s to %s\n", t.EarliestRun.Format(time.DateTime), t.LatestRun.Format(time.DateTime)))
+	}
+	builder.WriteString("\n")
+
 	renderer.WriteColor(builder, ColorReset)
 
 	// Tabular Stats Projection
-	b := regression.Baseline
-	t := regression.Target
-
 	renderer.WriteColor(builder, ColorMuted)
 	builder.WriteString(fmt.Sprintf("%-16s %12s -> %12s\n", "", "Baseline", "Target"))
 	renderer.WriteColor(builder, ColorReset)

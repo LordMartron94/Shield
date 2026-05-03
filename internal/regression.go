@@ -8,6 +8,7 @@ import (
 	"memstruct"
 	"statarch/core"
 	"statarch/hypothesis"
+	"time"
 )
 
 // --------------------------------------------------------------- REGRESSION TYPES
@@ -47,6 +48,9 @@ type StabilityStats struct {
 	FailedRuns        int
 	FailureRate       float64
 	AverageFailedIter uint64
+
+	EarliestRun time.Time
+	LatestRun   time.Time
 }
 
 type StabilityRegressionResult struct {
@@ -101,7 +105,17 @@ func calculateStabilityStats(runs []ScenarioRunResult) (StabilityStats, []float6
 	var totalFailedIters uint64
 	var iters []float64
 
+	earliest, latest := runs[0].StartedAt(), runs[0].StartedAt()
+
 	for _, run := range runs {
+		currentStart := run.StartedAt()
+
+		if currentStart.Before(earliest) {
+			earliest = currentStart
+		} else if currentStart.After(latest) { // mutually exclusive, cannot be both earlier and later.
+			latest = currentStart
+		}
+
 		if !run.Passed() {
 			failedCount++
 			iter := getEarliestFailureIteration(run.GuardResults())

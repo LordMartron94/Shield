@@ -3,8 +3,8 @@ package tests
 import (
 	"fmt"
 	"shield"
-	"shield/internal"
 	"testing"
+	"time"
 )
 
 func TestShieldRendering(t *testing.T) {
@@ -12,7 +12,6 @@ func TestShieldRendering(t *testing.T) {
 		MaxIterations: 1,
 	}
 
-	// 1. Generate a diverse dataset spanning multiple zones with passing and failing states.
 	scenarios := []shield.SHIELD_Testing_ScenarioRunResult{
 		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Sum_Positive", "Math", "Addition"), runConfig),
 		shield.SHIELD_Testing_ScenarioRun(buildFailScenario("Sum_Negative", "Math", "Addition"), runConfig),
@@ -31,7 +30,6 @@ func TestShieldRendering(t *testing.T) {
 		{"None (Plaintext)", shield.SHIELD_Rendering_Color_None},
 	}
 
-	// 2. Render the exact same dataset across all three color modes.
 	for _, tc := range modes {
 		fmt.Printf("\n\n========================================\n")
 		fmt.Printf(" MODE: %s\n", tc.name)
@@ -40,28 +38,31 @@ func TestShieldRendering(t *testing.T) {
 		cfg := shield.SHIELD_Rendering_ConfigurationCreate(tc.mode)
 		renderer := shield.SHIELD_Rendering_RendererCreate(cfg)
 
-		// Note: We duplicate the slice because the renderer sorts it in-place
-		// and we want to ensure the function works regardless of initial order.
 		sliceCopy := make([]shield.SHIELD_Testing_ScenarioRunResult, len(scenarios))
 		copy(sliceCopy, scenarios)
 
 		output := shield.SHIELD_Rendering_FormatScenarioRunResults(renderer, sliceCopy)
-
-		// Print directly to stdout to bypass test-logger ANSI stripping
 		fmt.Println(output)
 	}
 }
 
 func TestShieldRegressionRendering(t *testing.T) {
+	runConfig := shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1}
+
+	// Generate physical runs strictly to satisfy the "Sources" temporal rendering
+	dummyBase := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), runConfig)
+	dummyTarget := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), runConfig)
+
 	// -------------------------------------------------------------------------
-	// 1. Synthesize Identical Regression Data
+	// 1. Synthesize Identical Regression Data (Public API)
 	// -------------------------------------------------------------------------
-	identicalData := internal.RegressionResult{
+	identicalData := shield.SHIELD_Regression_Result{
 		IsRegression: true,
-		GuardDeltas: []internal.GuardRegressionDelta{
+		Sources:      []shield.SHIELD_Testing_ScenarioRunResult{dummyBase, dummyTarget},
+		GuardDeltas: []shield.SHIELD_Regression_GuardDelta{
 			{
 				GuardName:      "Parse_Config_Malformed",
-				Severity:       internal.RegressionSeverity_OutcomeShift,
+				Severity:       shield.SHIELD_Regression_Severity_OutcomeShift,
 				BaselinePassed: true,
 				TargetPassed:   false,
 				TargetIter:     0,
@@ -69,7 +70,7 @@ func TestShieldRegressionRendering(t *testing.T) {
 			},
 			{
 				GuardName:      "Calculate_Trajectory",
-				Severity:       internal.RegressionSeverity_Degradation,
+				Severity:       shield.SHIELD_Regression_Severity_Degradation,
 				BaselinePassed: false,
 				TargetPassed:   false,
 				BaselineIter:   0,
@@ -79,7 +80,7 @@ func TestShieldRegressionRendering(t *testing.T) {
 			},
 			{
 				GuardName:      "Fuzz_Hash_Collision",
-				Severity:       internal.RegressionSeverity_FragilityShift,
+				Severity:       shield.SHIELD_Regression_Severity_FragilityShift,
 				BaselinePassed: false,
 				TargetPassed:   false,
 				BaselineIter:   95000,
@@ -89,7 +90,7 @@ func TestShieldRegressionRendering(t *testing.T) {
 			},
 			{
 				GuardName:      "Network_Timeout",
-				Severity:       internal.RegressionSeverity_Improvement,
+				Severity:       shield.SHIELD_Regression_Severity_Improvement,
 				BaselinePassed: false,
 				TargetPassed:   true,
 				BaselineIter:   4,
@@ -99,23 +100,28 @@ func TestShieldRegressionRendering(t *testing.T) {
 	}
 
 	// -------------------------------------------------------------------------
-	// 2. Synthesize Stability Regression Data
+	// 2. Synthesize Stability Regression Data (Public API)
 	// -------------------------------------------------------------------------
-	stabilityData := internal.StabilityRegressionResult{
+	now := time.Now()
+	stabilityData := shield.SHIELD_Regression_Stability_Result{
 		IsRegression: true,
-		Severity:     internal.RegressionSeverity_OutcomeShift,
+		Severity:     shield.SHIELD_Regression_Severity_OutcomeShift,
 		Reason:       "Statistically significant failure rate increase (p=0.0124). Rate shifted from 2.00% to 14.00%",
-		Baseline: internal.StabilityStats{
+		Baseline: shield.SHIELD_Regression_StabilityStats{
 			TotalRuns:         500,
 			FailedRuns:        10,
 			FailureRate:       0.02,
 			AverageFailedIter: 85000,
+			EarliestRun:       now.Add(-48 * time.Hour),
+			LatestRun:         now.Add(-24 * time.Hour),
 		},
-		Target: internal.StabilityStats{
+		Target: shield.SHIELD_Regression_StabilityStats{
 			TotalRuns:         500,
 			FailedRuns:        70,
 			FailureRate:       0.14,
 			AverageFailedIter: 12000,
+			EarliestRun:       now.Add(-24 * time.Hour),
+			LatestRun:         now,
 		},
 	}
 
@@ -124,11 +130,11 @@ func TestShieldRegressionRendering(t *testing.T) {
 	// -------------------------------------------------------------------------
 	modes := []struct {
 		name string
-		mode internal.RenderingColorMode
+		mode shield.SHIELD_Rendering_ColorMode
 	}{
-		{"TrueColor (24-bit)", internal.Render_Color_True},
-		{"ANSI16 (4-bit)", internal.Render_Color_ANSI16},
-		{"None (Plaintext)", internal.Render_Color_None},
+		{"TrueColor (24-bit)", shield.SHIELD_Rendering_Color_True},
+		{"ANSI16 (4-bit)", shield.SHIELD_Rendering_Color_ANSI16},
+		{"None (Plaintext)", shield.SHIELD_Rendering_Color_None},
 	}
 
 	for _, tc := range modes {
@@ -136,14 +142,14 @@ func TestShieldRegressionRendering(t *testing.T) {
 		fmt.Printf(" MODE: %s\n", tc.name)
 		fmt.Printf("========================================\n\n")
 
-		cfg := internal.RenderingConfigurationCreate(tc.mode)
-		renderer := internal.RendererCreate(cfg)
+		cfg := shield.SHIELD_Rendering_ConfigurationCreate(tc.mode)
+		renderer := shield.SHIELD_Rendering_RendererCreate(cfg)
 
 		// 1. Identical Output
-		fmt.Println(internal.RenderIdenticalRegression(renderer, identicalData))
+		fmt.Println(shield.SHIELD_Rendering_FormatIdenticalRegressionReport(renderer, identicalData))
 
 		// 2. Stability Output
-		fmt.Println(internal.RenderStabilityRegression(renderer, stabilityData))
+		fmt.Println(shield.SHIELD_Rendering_FormatStabilityRegressionReport(renderer, stabilityData))
 	}
 }
 
@@ -177,7 +183,7 @@ func buildFailScenario(name string, zones ...string) shield.SHIELD_Testing_Scena
 		shield.SHIELD_Testing_GuardPolicyMustEqual(
 			func(a, b int) bool { return a == b },
 			func(item int) string { return fmt.Sprintf("%d", item) },
-			99, // Expect 99, but executor returns 1. This guarantees a failure reason.
+			99,
 		),
 	)
 
