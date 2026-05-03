@@ -8,11 +8,15 @@ import (
 /*
 SHIELD regression endpoints compare scenario run outcomes:
 
-- Pairwise deterministic comparison (`SHIELD_Regression_CheckIdentical`) for baseline/target runs executed under aligned fuzz snapshots.
+- Pairwise deterministic comparison (`SHIELD_Regression_CheckIdentical`) for baseline/target runs executed under aligned fuzz snapshots
 
-- Population stability comparison (`SHIELD_Regression_CheckStability`) for many baseline vs many target runs using asymptotic/statistical summaries.
+and matching SystemIdentity.Environment (Version may differ).
 
-- Convenience loaders (`SHIELD_Regression_CheckIdenticalFromStorage`, `SHIELD_Regression_CheckStabilityFromStorage`) hydrate those comparisons from persisted aggregates via `SHIELD_Testing_Storage_*`.
+- Population stability comparison (`SHIELD_Regression_CheckStability`) for many baseline vs many target runs using asymptotic/statistical summaries;
+
+each cohort must be internally pure on Environment and Version.
+
+- Convenience loaders (`SHIELD_Regression_CheckIdenticalFromStorage`, `SHIELD_Regression_CheckStabilityFromStorage`) hydrate comparisons from SQLite via `SHIELD_Testing_Storage_*`; stability uses `SHIELD_Testing_Storage_ScenarioResultFindByIdentity` with explicit identities.
 
 All heavy logic lives under `shield/internal`; this file is a typed facade only.
 */
@@ -97,6 +101,10 @@ FailureRate equals `FailedRuns / TotalRuns`.
 
 AverageFailedIter is the arithmetic mean (unsigned) over observed earliest failing iterations per failing run only; zero when no failures occurred.
 
+Identity echoes the homogeneous SystemIdentity taken from the first run (cohorts are validated before aggregation).
+
+EarliestRun/LatestRun bracket wall StartedAt timestamps spanning the slice; zero values mean the engine never stamped them (should not occur for real SHIELD runs).
+
 Consumers should treat ints as cardinality data and rates as fractions in `[0,1]` for successful slices.
 */
 type SHIELD_Regression_StabilityStats = internal.StabilityStats
@@ -119,7 +127,11 @@ SHIELD_Regression_CheckIdentical performs deterministic pairwise regression betw
 
 [Algorithm]
 
-Validated snapshot knobs (Seed, FuzzingPattern, MaxIterations) must match exactly; divergence aborts before guard comparison.
+Validated snapshot knobs (Seed, FuzzingPattern, MaxIterations) plus SystemIdentity.Environment parity must match exactly;
+
+divergence aborts before guard comparison. Version labels are intentionally ignored for identical runs so software version
+
+bumps still compare deterministically when the deployment Environment stays aligned.
 
 Guard regression walks baseline `GuardResults` in order, resolving each name against the target run. For each pair: pass/fail flips map to Improvement or OutcomeShift; when both fail, Shield first compares FailureReason strings—any change yields FailureDegradation; if reasons match, strictly earlier target failure iteration yields FragilityIncrease (FragilityShift constant). Missing target guards synthesize an OutcomeShift row. Target-only guards are not compared. Deltas omit severities of None. Improvements are listed but do not set `IsRegression`.
 
@@ -129,7 +141,7 @@ Filled `Sources` preserving argument order `[baseline,target]`.
 
 [Errors]
 
-Malformed comparisons return wrapped errors distinguishing seed, fuzzing-pattern, or max-iteration mismatch.
+Malformed comparisons return wrapped errors distinguishing seed, fuzzing-pattern, max-iteration mismatch, or environment mismatch.
 
 Pure read-only function over supplied runs.
 */
@@ -146,6 +158,8 @@ SHIELD_Regression_CheckStability compares two populations (`baseline` slice vs `
 [ Preconditions ]
 
 Each slice must contain at least 50 `ScenarioRunResult` entries (`len(slice) ≥ 50`); violating this yields a non-nil error with an explanatory wrapped message.
+
+Every run within a slice must share the same SnapshotConfig Identity (Environment and Version); mixed cohorts abort with a wrapped contamination error naming the offending index.
 
 ConfidenceLevel denotes the desired simultaneous confidence mass for asymptotic thresholds (converted internally to `alpha = 1 − confidenceLevel`).
 
@@ -167,7 +181,7 @@ Function does not persist results; callers integrate with storage voluntarily.
 
 [Errors ]
 
-Only insufficient sample sizes currently surface errors; numerical degeneracies propagate as finite floats inside stats without auxiliary errors today.
+Insufficient sample sizes and Identity mixture across a slice surface errors; numerical degeneracies propagate as finite floats inside stats without auxiliary errors today.
 */
 func SHIELD_Regression_CheckStability(
 	baseline []SHIELD_Testing_ScenarioRunResult,
@@ -212,35 +226,37 @@ func SHIELD_Regression_CheckIdenticalFromStorage(
 /*
 SHIELD_Regression_CheckStabilityFromStorage gathers stored cohort aggregates for paired scenario names across optional distinct engines before delegating stability analysis.
 
+baselineIdentity and targetIdentity funnel into `SHIELD_Testing_Storage_ScenarioResultFindByIdentity` so populations never mix Environment/Version columns across the query.
+
 baselineEngine/baselineScenarioName designates the authoritative population; targetEngine/targetScenarioName designates the challenger population.
 
-Use the same engine pointer twice when both cohorts share one SQLite ledger but differing scenario_name labels (for example partitioned datasets).
+Use the same engine pointer twice when both cohorts share one SQLite ledger but differing scenarios or identities.
 
 Ordering note:
 
-Stored rows follow repository iteration order for the filter (`scenario_name`). Do not infer temporal ordering unless the caller establishes it elsewhere.
+Stored rows follow repository iteration order for the compound filter. Sort by StartedAt if chronological analysis matters.
 
-ConfidenceLevel behaves identically to `SHIELD_Regression_CheckStability` after hydrating slices via `FindByName`.
+ConfidenceLevel behaves identically to `SHIELD_Regression_CheckStability` once slices hydrate.
 */
 func SHIELD_Regression_CheckStabilityFromStorage(
 	baselineEngine *SHIELD_Testing_Storage_Engine,
 	baselineScenarioName string,
+	baselineIdentity SHIELD_Testing_SystemIdentity,
 	targetEngine *SHIELD_Testing_Storage_Engine,
 	targetScenarioName string,
+	targetIdentity SHIELD_Testing_SystemIdentity,
 	confidenceLevel float64,
 ) (SHIELD_Regression_Stability_Result, error) {
 	var zero SHIELD_Regression_Stability_Result
 
-	basePtrs, err := SHIELD_Testing_Storage_ScenarioResultFindByName(baselineEngine, baselineScenarioName)
+	basePtrs, err := SHIELD_Testing_Storage_ScenarioResultFindByIdentity(baselineEngine, baselineScenarioName, baselineIdentity)
 	if err != nil {
-		return zero, fmt.Errorf(
-			"load baseline cohort %q: %w", baselineScenarioName, err)
+		return zero, fmt.Errorf("load baseline cohort %q (env: %s): %w", baselineScenarioName, baselineIdentity.Environment, err)
 	}
 
-	tgtPtrs, err := SHIELD_Testing_Storage_ScenarioResultFindByName(targetEngine, targetScenarioName)
+	tgtPtrs, err := SHIELD_Testing_Storage_ScenarioResultFindByIdentity(targetEngine, targetScenarioName, targetIdentity)
 	if err != nil {
-		return zero, fmt.Errorf(
-			"load target cohort %q: %w", targetScenarioName, err)
+		return zero, fmt.Errorf("load target cohort %q (env: %s): %w", targetScenarioName, targetIdentity.Environment, err)
 	}
 
 	baselineRuns, err := slicesFromStoredScenarioPointers(basePtrs)

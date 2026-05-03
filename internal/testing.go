@@ -316,6 +316,13 @@ func (z ZonePath) Render(separator string) string {
 
 // --------------------------------------------------------------- SCENARIO
 
+// SystemIdentity tags who produced a ScenarioRun snapshot: logical deployment tier (Environment) plus build/software Version.
+// Both strings must be non-empty before ScenarioRun accepts a ScenarioRunConfig; they persist through storage and regressions compare environments for identical runs while stability cohorts require homogeneous env+version.
+type SystemIdentity struct {
+	Version     string
+	Environment string
+}
+
 type Executor[TInput, TOutput any] func(input TInput) (output TOutput, error error)
 
 type Scenario[TInput, TOutput any] struct {
@@ -408,6 +415,7 @@ type SnapshotConfig struct {
 	MaxDuration    time.Duration
 	UseDuration    bool
 	ProviderID     string
+	Identity       SystemIdentity // persisted environment + version echo for regression + rendering context
 }
 
 /*
@@ -449,7 +457,7 @@ func (s *ScenarioRunResult) GuardResults() []GuardEvaluationResult {
 }
 
 /*
-SnapshotConfig returns fuzzing configuration used by this scenario run.
+SnapshotConfig returns the immutable snapshot for this scenario run—fuzz knobs, entropy provider tag, SystemIdentity lineage.
 */
 func (s *ScenarioRunResult) SnapshotConfig() SnapshotConfig {
 	return s.runConfig
@@ -479,6 +487,8 @@ type ScenarioRunConfig struct {
 	MaxIterations uint64
 	MaxDuration   time.Duration
 	UseDuration   bool
+
+	Identity SystemIdentity // required non-empty Environment+Version; echoed into ScenarioRun snapshots
 }
 
 func ScenarioRunConfigFromSnapshot(
@@ -492,6 +502,7 @@ func ScenarioRunConfigFromSnapshot(
 		MaxDuration:            snapshot.MaxDuration,
 		UseDuration:            snapshot.UseDuration,
 		EntropyProviderFactory: entropyProviderFactory,
+		Identity:               snapshot.Identity,
 	}
 }
 
@@ -499,6 +510,10 @@ func ScenarioRun[TInput, TOutput any](
 	scenario Scenario[TInput, TOutput],
 	config ScenarioRunConfig,
 ) ScenarioRunResult {
+	if config.Identity.Version == "" || config.Identity.Environment == "" {
+		panic("engine error: scenario configuration must be set")
+	}
+
 	seed, _ := essence.UUIDv7GenerateRandom()
 	if config.SeedOverride != nil {
 		seed = *config.SeedOverride
@@ -531,6 +546,7 @@ func ScenarioRun[TInput, TOutput any](
 			MaxDuration:    config.MaxDuration,
 			UseDuration:    config.UseDuration,
 			ProviderID:     entropyProviderID,
+			Identity:       config.Identity,
 		},
 		zonePath: scenario.zonePath,
 	}

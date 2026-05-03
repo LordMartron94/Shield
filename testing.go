@@ -13,6 +13,7 @@ This is the testing endpoint for SHIELD.
 Features:
 - Data-Driven Testing Setup
 - Fuzzing system
+- SystemIdentity on every run snapshot (storage + regression filters)
 - Operation-scoped lifecycle with deferred teardown; framework panics become synthetic ScenarioRunResults
 - Snapshot-driven ScenarioRunConfig reconstruction and SQLite-backed replays (`SHIELD_Testing_ScenarioRunReplay*` / `*_FromSnapshot`)
 */
@@ -27,17 +28,21 @@ type SHIELD_Testing_GuardPolicy[TOutput any] = internal.GuardPolicy[TOutput]
 
 /*
 SHIELD_Testing_ScenarioRunConfig sets runtime configuration for a scenario.
+
+Identity must carry non-empty Environment and Version strings; SHIELD_Testing_ScenarioRun panics otherwise so every
+
+persisted row carries an explicit system lineage. Identity is copied verbatim into SnapshotConfig on the result.
 */
 type SHIELD_Testing_ScenarioRunConfig = internal.ScenarioRunConfig
 
 /*
-SHIELD_Testing_SnapshotConfig is the immutable fuzzing snapshot carried by ScenarioRunResult.SnapshotConfig().
+SHIELD_Testing_SnapshotConfig is the immutable snapshot carried by ScenarioRunResult.SnapshotConfig().
 
-# It records the seed, fuzzing pattern, effort bounds, whether limits are iteration- or duration-based, and the entropy
+# It bundles seed, fuzzing pattern, iteration or duration caps, UseDuration, entropy provider diagnostic string, and
 
-provider label string attached to that run. Storage round-trips these fields; replay helpers translate them into
+Identity (environment + version last seen when the run executed). Storage round-trips those fields; replay helpers
 
-SHIELD_Testing_ScenarioRunConfig via SHIELD_Testing_ScenarioRunConfigFromSnapshot.
+project them back into SHIELD_Testing_ScenarioRunConfig via SHIELD_Testing_ScenarioRunConfigFromSnapshot.
 */
 type SHIELD_Testing_SnapshotConfig = internal.SnapshotConfig
 
@@ -55,6 +60,19 @@ This can be treated as metadata and is not used by the execution engine.
 Only the rendering engine and/or downstream systems (can) make use of this.
 */
 type SHIELD_Testing_ZonePath = internal.ZonePath
+
+/*
+SHIELD_Testing_SystemIdentity scopes telemetry to a deployment context and build label.
+
+Environment names the logical tier (for example ci, staging). Version names the software artefact or commit label you
+
+want regression filters to key on. Both must be non-empty for SHIELD_Testing_ScenarioRun.
+
+Identical pairwise regression requires matching Environment (Version may differ); cohort stability requires every run in a
+
+slice share the same Environment and Version; storage FindByIdentity narrows rows by scenario name plus both fields.
+*/
+type SHIELD_Testing_SystemIdentity = internal.SystemIdentity
 
 /*
 SHIELD_Testing_ZonePathCreate builds a metadata zone path from ordered segment strings.
@@ -231,7 +249,9 @@ func SHIELD_Testing_ScenarioCreate[TInput, TOutput any](
 }
 
 /*
-SHIELD_Testing_ScenarioRun runs a scenario and returns its result.
+SHIELD_Testing_ScenarioRun executes scenario under runConfig including mandatory Identity.
+
+Violating Identity invariants (blank Environment or Version) panics as a framework misuse error from the engine.
 */
 func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
 	scenario SHIELD_Testing_Scenario[TInput, TOutput],
@@ -243,15 +263,17 @@ func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
 /*
 SHIELD_Testing_ScenarioRunConfigFromSnapshot materializes a runnable config from a prior SnapshotConfig.
 
-# SeedOverride receives snapshot.Seed so ScenarioRun matches the stored trajectory when combined with the same
+# SeedOverride receives snapshot.Seed so ScenarioRun matches the stored trajectory when combined with the same entropy
 
-entropy factory semantics. FuzzingPattern, MaxIterations or MaxDuration, and UseDuration copy across directly.
+factory semantics. FuzzingPattern, MaxIterations or MaxDuration, UseDuration, and Identity copy across directly.
 
-entropyProviderFactory is stored on ScenarioRunConfig unchanged; nil keeps SHIELD’s default MixSplit128 provider while
+entropyProviderFactory passes through unchanged; nil keeps SHIELD’s default MixSplit128 provider while still fixing the seed.
 
-still fixing the seed. SnapshotConfig.ProviderID is diagnostic metadata only—bit-identical entropy plumbing versus the
+# SnapshotConfig.ProviderID remains diagnostic only—bit-identical entropy plumbing versus the original run requires a factory
 
-original run requires the caller to supply a factory that honors that identifier if their pipeline depends on it.
+honoring that identifier when your pipeline relies on it.
+
+Identity must stay non-empty exactly as when the snapshot was produced; otherwise ScenarioRun still panics before work begins.
 */
 func SHIELD_Testing_ScenarioRunConfigFromSnapshot(
 	snapshot SHIELD_Testing_SnapshotConfig,
@@ -267,11 +289,11 @@ SHIELD_Testing_ScenarioRunReplayFromStoredAggregate replays scenario using the s
 
 stored must be non-nil. entropyProviderFactory follows SHIELD_Testing_ScenarioRunConfigFromSnapshot.
 
-# The callable scenario definition (guards, executor, zone metadata) is supplied independently—this only reapplies knobs
+# The callable scenario definition (guards, executor, zone metadata) is supplied independently—this reapplies knobs plus
 
-from stored.SnapshotConfig(). Mismatch between scenario and stored scenario name / shape is intentionally allowed so
+Identity from stored.SnapshotConfig(). Mismatch between scenario and stored scenario name or shape is intentional for
 
-callers can bisect behavioural changes deliberately.
+bisection; Identity from the row is always replayed verbatim.
 */
 func SHIELD_Testing_ScenarioRunReplayFromStoredAggregate[TInput, TOutput any](
 	scenario SHIELD_Testing_Scenario[TInput, TOutput],
@@ -340,7 +362,9 @@ When startup returns `(state, nil)` without recovering a panic the runner invoke
 
 Deferred teardown always runs once startup succeeds, after WallDuration bookkeeping; teardown panic appends synthetic Operation_Teardown_Failure.
 
-runScenarios usually loops SHIELD_Testing_ScenarioRun while reusing run configuration.
+runScenarios usually loops SHIELD_Testing_ScenarioRun while reusing or layering run configuration—the config’s Identity
+
+must remain valid on every inner call.
 */
 func SHIELD_Testing_OperationCreate[TState any](
 	name string,

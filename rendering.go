@@ -44,7 +44,7 @@ SHIELD_Rendering_Renderer fronts fixed palette tables for SHIELD_Rendering_Forma
 
 SHIELD_Rendering_FormatIdenticalRegressionReport, and SHIELD_Rendering_FormatStabilityRegressionReport.
 
-Construct exclusively via SHIELD_Rendering_RendererCreate; renderer identity is concurrency-safe across format calls because palettes are immutable and each invocation owns its scratch builder memory.
+Construct exclusively via SHIELD_Rendering_RendererCreate; shared Renderer handles stay safe across concurrent format calls because palettes never mutate post-create and builders stay local per invocation (orthogonal to ScenarioRun SystemIdentity fields).
 */
 type SHIELD_Rendering_Renderer = internal.Renderer
 
@@ -60,11 +60,13 @@ func SHIELD_Rendering_RendererCreate(cfg *SHIELD_Rendering_Configuration) *SHIEL
 /*
 SHIELD_Rendering_FormatScenarioRunResults returns a textual “SHIELD DEFENCE REPORT” for the supplied ScenarioRunResults.
 
-Empty input emits “No scenarios executed.” plus newline. Otherwise emits aggregate scenario counts,
+Empty input emits “No scenarios executed.” plus newline. Otherwise emits a Context line summarising SystemIdentity when
 
-wall versus summed durations, then each scenario sorted stably by ZonePath.Render("."). Zone segments render as indented
+every row agrees; mixed Identity batches print “<Mixed Batch>” before scenario counts, aggregate wall versus summed
 
-breadcrumbs; each scenario prints pass/fail, name, wall time, then failing guards with FailureReason text.
+durations, optional first-run execution timestamp, zone tree sorted stably by ZonePath.Render("."),
+
+and per-scenario pass markers with failing-guard FailureReason lines.
 
 renderer must originate from SHIELD_Rendering_RendererCreate; nil panics inside renderer wiring.
 
@@ -84,11 +86,13 @@ SHIELD_Regression_CheckIdentical (or Storage twin) into a terminal-oriented summ
 
 Outputs a labelled header (“SHIELD IDENTICAL REGRESSION REPORT”), pass/fail verdict coloring
 
-(STABLE / IMPROVED versus REGRESSION DETECTED from IsRegression), then either a muted “no deltas” sentence
+(STABLE / IMPROVED versus REGRESSION DETECTED from IsRegression). When Sources carries two runs it prints each side’s
 
-when GuardDeltas is empty or—for each retained delta—severity token, guard name,
+SystemIdentity plus wall StartedAt stamp before deltas. With GuardDeltas empty a muted “no deltas” sentence appears;
 
-and indented baseline/target PASS versus FAIL rows with fuzz iteration snippets and stitched reason strings.
+otherwise each retained delta emits severity token, guard name, and indented baseline/target PASS versus FAIL rows with fuzz
+
+iteration snippets plus stitched reason strings.
 
 Improvement deltas use pass hues; regressing severities use fail hues; severity None deltas use muted styling if ever present.
 
@@ -106,11 +110,13 @@ func SHIELD_Rendering_FormatIdenticalRegressionReport(
 /*
 SHIELD_Rendering_FormatStabilityRegressionReport formats StabilityRegressionResult from SHIELD_Regression_CheckStability
 
-(or Storage hydrator): cohort verdict line, enumerated Severity plus Reason excerpt, then a fixed-width baseline→target projection listing total runs, failure-rate percentages with conditional fail highlights
+(or Storage hydrator): cohort verdict line, enumerated Severity plus Reason excerpt, then—for each side when temporal data
 
-when the target rate strictly exceeds baseline, and mean earliest-failing iteration (“Mean Fragility”) with conditional fail highlights
+exists—the cohort SystemIdentity, earliest and latest StartedAt timestamps, and span wording before the tabular stats.
 
-when targets fail sooner on average while the target cohort recorded failures.
+The table lists total runs, conditional-highlighted failure-rate deltas, and mean earliest-failing iteration (“Mean Fragility”)
+
+when targets fail sooner on average while the target cohort logged failures.
 
 Pure string emission only—no mutation of StabilityRegressionResult. renderer wiring constraints match the other rendering entry points.
 */

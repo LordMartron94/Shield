@@ -10,6 +10,10 @@ import (
 func TestShieldRendering(t *testing.T) {
 	runConfig := shield.SHIELD_Testing_ScenarioRunConfig{
 		MaxIterations: 1,
+		Identity: shield.SHIELD_Testing_SystemIdentity{
+			Version:     "v1",
+			Environment: "local",
+		},
 	}
 
 	scenarios := []shield.SHIELD_Testing_ScenarioRunResult{
@@ -47,11 +51,25 @@ func TestShieldRendering(t *testing.T) {
 }
 
 func TestShieldRegressionRendering(t *testing.T) {
-	runConfig := shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1}
+	runConfigBase := shield.SHIELD_Testing_ScenarioRunConfig{
+		MaxIterations: 1,
+		Identity: shield.SHIELD_Testing_SystemIdentity{
+			Version:     "v1",
+			Environment: "local",
+		},
+	}
+
+	runConfigTarget := shield.SHIELD_Testing_ScenarioRunConfig{
+		MaxIterations: 1,
+		Identity: shield.SHIELD_Testing_SystemIdentity{
+			Version:     "v2",
+			Environment: "local",
+		},
+	}
 
 	// Generate physical runs strictly to satisfy the "Sources" temporal rendering
-	dummyBase := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), runConfig)
-	dummyTarget := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), runConfig)
+	dummyBase := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), runConfigBase)
+	dummyTarget := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), runConfigTarget)
 
 	// -------------------------------------------------------------------------
 	// 1. Synthesize Identical Regression Data (Public API)
@@ -114,6 +132,7 @@ func TestShieldRegressionRendering(t *testing.T) {
 			AverageFailedIter: 85000,
 			EarliestRun:       now.Add(-48 * time.Hour),
 			LatestRun:         now.Add(-24 * time.Hour),
+			Identity:          runConfigBase.Identity,
 		},
 		Target: shield.SHIELD_Regression_StabilityStats{
 			TotalRuns:         500,
@@ -122,6 +141,7 @@ func TestShieldRegressionRendering(t *testing.T) {
 			AverageFailedIter: 12000,
 			EarliestRun:       now.Add(-24 * time.Hour),
 			LatestRun:         now,
+			Identity:          runConfigTarget.Identity,
 		},
 	}
 

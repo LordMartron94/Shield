@@ -28,6 +28,8 @@ const (
 	colMaxDuration      = "max_duration"
 	colUseDuration      = "use_duration"
 	colProviderID       = "provider_id"
+	colVersion          = "version"
+	colEnvironment      = "environment"
 
 	// Guard Columns
 	colGuardID              = "guard_result_id"
@@ -56,6 +58,8 @@ type testResultEntity struct {
 	MaxDuration      int64 // Nanoseconds
 	UseDuration      int   // 0 or 1
 	ProviderID       string
+	Version          string
+	Environment      string
 }
 
 type guardResultEntity struct {
@@ -144,6 +148,18 @@ func createTestResultsTableDef() persistence.SQLite3TableConfiguration[testResul
 			colScenarioZonePath, persistence.SQLiteDataTypeText,
 			func(t *testResultEntity) any { return t.ScenarioZonePath },
 			func(t *testResultEntity) any { return &t.ScenarioZonePath },
+			persistence.SQLite3SchemaFieldOptionsFilterable(),
+		),
+		persistence.SQLite3SchemaFieldCreateManual(
+			colVersion, persistence.SQLiteDataTypeText,
+			func(t *testResultEntity) any { return t.Version },
+			func(t *testResultEntity) any { return &t.Version },
+			persistence.SQLite3SchemaFieldOptionsFilterable(),
+		),
+		persistence.SQLite3SchemaFieldCreateManual(
+			colEnvironment, persistence.SQLiteDataTypeText,
+			func(t *testResultEntity) any { return t.Environment },
+			func(t *testResultEntity) any { return &t.Environment },
 			persistence.SQLite3SchemaFieldOptionsFilterable(),
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
@@ -345,6 +361,43 @@ func TestResultDatabaseScenarioResultFindByName(db *TestResultDatabase, name str
 	return results, nil
 }
 
+func TestResultDatabaseScenarioResultFindByIdentity(
+	db *TestResultDatabase,
+	name string,
+	environment string,
+	version string,
+) ([]*ScenarioRunResult, error) {
+	if err := testResultDatabaseEnsureOpen(db); err != nil {
+		return nil, err
+	}
+
+	filters := map[string]any{
+		colScenarioName: name,
+		colEnvironment:  environment,
+		colVersion:      version,
+	}
+
+	scenarioEntities, err := persistence.SQLite3RepoFindByFields[testResultEntity](db.engine, testResultsTableName, filters)
+	if err != nil {
+		return nil, fmt.Errorf("issue getting scenario results: %w", err)
+	}
+
+	results := make([]*ScenarioRunResult, 0, len(scenarioEntities))
+	for _, scenarioEntity := range scenarioEntities {
+		guardEntities, guardErr := persistence.SQLite3RepoFindByField[guardResultEntity](
+			db.engine, guardResultsTableName, colGuardTestID, scenarioEntity.ResultID,
+		)
+		if guardErr != nil {
+			return nil, fmt.Errorf("failed fetching guards for scenario %s: %w", scenarioEntity.ResultID, guardErr)
+		}
+
+		entityVal := *scenarioEntity
+		results = append(results, mapEntityToScenario(&entityVal, guardEntities))
+	}
+
+	return results, nil
+}
+
 // --------------------------------------------------------------- PRIVATE HELPERS
 
 func mapEntityToScenario(scenario *testResultEntity, guards []*guardResultEntity) *ScenarioRunResult {
@@ -378,6 +431,10 @@ func mapEntityToScenario(scenario *testResultEntity, guards []*guardResultEntity
 			MaxDuration:    time.Duration(scenario.MaxDuration),
 			UseDuration:    scenario.UseDuration == 1,
 			ProviderID:     scenario.ProviderID,
+			Identity: SystemIdentity{
+				Version:     scenario.Version,
+				Environment: scenario.Environment,
+			},
 		},
 	}
 }
@@ -407,6 +464,8 @@ func mapScenarioToEntity(scenario ScenarioRunResult, scenarioID string) testResu
 		MaxDuration:      cfg.MaxDuration.Nanoseconds(),
 		UseDuration:      useDurationInt,
 		ProviderID:       cfg.ProviderID,
+		Version:          cfg.Identity.Version,
+		Environment:      cfg.Identity.Environment,
 	}
 }
 

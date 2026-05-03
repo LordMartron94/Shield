@@ -11,6 +11,10 @@ func TestShieldStoragePublicAPI(t *testing.T) {
 	scenario := buildSumScenario()
 	runResult := shield.SHIELD_Testing_ScenarioRun(scenario, shield.SHIELD_Testing_ScenarioRunConfig{
 		MaxIterations: 1,
+		Identity: shield.SHIELD_Testing_SystemIdentity{
+			Version:     "v1",
+			Environment: "local",
+		},
 	})
 
 	dbPath := filepath.Join(t.TempDir(), "shield_storage_test.sqlite")

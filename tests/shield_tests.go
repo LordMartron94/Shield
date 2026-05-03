@@ -12,6 +12,10 @@ func TestShield(t *testing.T) {
 	scenario := buildSumScenario()
 	result := shield.SHIELD_Testing_ScenarioRun(scenario, shield.SHIELD_Testing_ScenarioRunConfig{
 		MaxIterations: 1,
+		Identity: shield.SHIELD_Testing_SystemIdentity{
+			Version:     "v1",
+			Environment: "local",
+		},
 	})
 	overhead := extractResultOverhead(result)
 

@@ -44,6 +44,8 @@ type RegressionResult struct {
 }
 
 type StabilityStats struct {
+	Identity SystemIdentity
+
 	TotalRuns         int
 	FailedRuns        int
 	FailureRate       float64
@@ -92,6 +94,14 @@ func CheckStabilityRegression(
 		return StabilityRegressionResult{}, fmt.Errorf("insufficient total runs for stability testing (min 50)")
 	}
 
+	if err := validateCohortPurity(baseline, "baseline"); err != nil {
+		return StabilityRegressionResult{}, err
+	}
+
+	if err := validateCohortPurity(target, "target"); err != nil {
+		return StabilityRegressionResult{}, err
+	}
+
 	baseStats, baseFailedIters := calculateStabilityStats(baseline)
 	tgtStats, tgtFailedIters := calculateStabilityStats(target)
 
@@ -112,7 +122,8 @@ func calculateStabilityStats(runs []ScenarioRunResult) (StabilityStats, []float6
 
 		if currentStart.Before(earliest) {
 			earliest = currentStart
-		} else if currentStart.After(latest) { // mutually exclusive, cannot be both earlier and later.
+		}
+		if currentStart.After(latest) {
 			latest = currentStart
 		}
 
@@ -130,6 +141,9 @@ func calculateStabilityStats(runs []ScenarioRunResult) (StabilityStats, []float6
 	}
 
 	stats := StabilityStats{
+		Identity:          runs[0].SnapshotConfig().Identity,
+		EarliestRun:       earliest,
+		LatestRun:         latest,
 		TotalRuns:         len(runs),
 		FailedRuns:        failedCount,
 		FailureRate:       float64(failedCount) / float64(len(runs)),
@@ -244,6 +258,7 @@ func checkFragilityDegradation(baseIters, tgtIters []float64, confidenceLevel fl
 	return isSignificant, mwuResult.PValue
 }
 
+// validateIdenticalSignatures enforces pairwise determinism prerequisites: fuzz snapshot fields plus Identity.Environment parity (Version deliberate mismatch allowed).
 func validateIdenticalSignatures(base SnapshotConfig, tgt SnapshotConfig) error {
 	if base.Seed != tgt.Seed {
 		return fmt.Errorf("invalid comparison: seed mismatch (%s vs %s)", base.Seed.String(), tgt.Seed.String())
@@ -253,6 +268,32 @@ func validateIdenticalSignatures(base SnapshotConfig, tgt SnapshotConfig) error 
 	}
 	if base.MaxIterations != tgt.MaxIterations {
 		return fmt.Errorf("invalid comparison: max iterations mismatch")
+	}
+	if base.Identity.Environment != tgt.Identity.Environment {
+		return fmt.Errorf("invalid comparison: environment mismatch (%s vs %s)", base.Identity.Environment, tgt.Identity.Environment)
+	}
+	return nil
+}
+
+func validateCohortPurity(runs []ScenarioRunResult, cohortName string) error {
+	if len(runs) == 0 {
+		return nil
+	}
+	expectedEnv := runs[0].SnapshotConfig().Identity.Environment
+	expectedVer := runs[0].SnapshotConfig().Identity.Version
+
+	for i, run := range runs {
+		actualEnv := run.SnapshotConfig().Identity.Environment
+		if actualEnv != expectedEnv {
+			return fmt.Errorf("invalid %s cohort: environment contamination detected. Expected %q, found %q at index %d",
+				cohortName, expectedEnv, actualEnv, i)
+		}
+
+		actualVer := run.SnapshotConfig().Identity.Version
+		if actualVer != expectedVer {
+			return fmt.Errorf("invalid %s cohort: version contamination detected. Expected %q, found %q at index %d",
+				cohortName, expectedVer, actualVer, i)
+		}
 	}
 	return nil
 }

@@ -99,10 +99,6 @@ func RendererCreate(cfg *RenderingConfiguration) *Renderer {
 	return r
 }
 
-/*
-WriteColor is a hot-path inline helper. No maps. Zero allocations.
-Direct memory access `O(1)` pointer arithmetic.
-*/
 func (r *Renderer) WriteColor(b *strings.Builder, c renderColor) {
 	b.Write(r.palette[c])
 }
@@ -129,21 +125,29 @@ func RenderScenarios(renderer *Renderer, scenarios []ScenarioRunResult) string {
 	builder.WriteString("=== SHIELD DEFENSE REPORT ===\n")
 	renderer.WriteColor(builder, ColorReset)
 
-	renderer.WriteColor(builder, ColorMuted)
-	builder.WriteString(fmt.Sprintf("Executed:  %s\n", scenarios[0].StartedAt().Format(time.DateTime)))
-	builder.WriteString(fmt.Sprintf("Scenarios: %d Total | ", total))
-	renderer.WriteColor(builder, ColorReset)
+	id, isPure := validateSliceIdentityPurity(scenarios)
+	const headerPad = 10
 
-	if passed == total {
-		renderer.WriteColor(builder, ColorPass)
-		builder.WriteString(fmt.Sprintf("%d Passed\n", passed))
+	renderer.WriteColor(builder, ColorMuted)
+	if isPure {
+		builder.WriteString(fmt.Sprintf("%-*s: %s\n", headerPad, "Context", formatIdentity(id)))
+		builder.WriteString(fmt.Sprintf("%-*s: %s\n", headerPad, "Executed", scenarios[0].StartedAt().Format(time.DateTime)))
 	} else {
-		renderer.WriteColor(builder, ColorFail)
-		builder.WriteString(fmt.Sprintf("%d Passed, %d Failed\n", passed, total-passed))
+		builder.WriteString(fmt.Sprintf("%-*s: <Mixed Batch>\n", headerPad, "Context"))
 	}
 
+	builder.WriteString(fmt.Sprintf("%-*s: %d Total ", headerPad, "Scenarios", total))
+	if passed == total {
+		renderer.WriteColor(builder, ColorPass)
+		builder.WriteString("(All Passed)\n")
+	} else {
+		renderer.WriteColor(builder, ColorFail)
+		builder.WriteString(fmt.Sprintf("(%d Passed, %d Failed)\n", passed, total-passed))
+	}
+	renderer.WriteColor(builder, ColorReset)
+
 	renderer.WriteColor(builder, ColorMuted)
-	builder.WriteString(fmt.Sprintf("Duration:  %v Wall | %v Summed\n\n", totalWall, totalSummed))
+	builder.WriteString(fmt.Sprintf("%-*s: %v Wall (%v Summed)\n\n", headerPad, "Duration", totalWall, totalSummed))
 	renderer.WriteColor(builder, ColorReset)
 
 	renderTreeIllusion(builder, renderer, scenarios)
@@ -167,10 +171,17 @@ func RenderIdenticalRegression(renderer *Renderer, regression RegressionResult) 
 	}
 	renderer.WriteColor(builder, ColorReset)
 
-	if len(regression.Sources) > 0 {
+	if len(regression.Sources) >= 2 {
 		renderer.WriteColor(builder, ColorMuted)
-		builder.WriteString(fmt.Sprintf("Baseline: %s\n", regression.Sources[0].StartedAt().Format(time.DateTime)))
-		builder.WriteString(fmt.Sprintf("Target:   %s\n\n", regression.Sources[1].StartedAt().Format(time.DateTime)))
+		baseStart := regression.Sources[0].StartedAt().Format(time.DateTime)
+		tgtStart := regression.Sources[1].StartedAt().Format(time.DateTime)
+
+		builder.WriteString(fmt.Sprintf("Baseline: %s at %s\n", formatIdentity(regression.Sources[0].SnapshotConfig().Identity), baseStart))
+		builder.WriteString(fmt.Sprintf("Target  : %s at %s\n\n", formatIdentity(regression.Sources[1].SnapshotConfig().Identity), tgtStart))
+		renderer.WriteColor(builder, ColorReset)
+	} else {
+		renderer.WriteColor(builder, ColorFail)
+		builder.WriteString("[RENDER ERROR] Malformed regression result: Missing comparative sources.\n\n")
 		renderer.WriteColor(builder, ColorReset)
 	}
 
@@ -193,7 +204,7 @@ func RenderIdenticalRegression(renderer *Renderer, regression RegressionResult) 
 
 		// 2. Render Header
 		renderer.WriteColor(builder, c)
-		builder.WriteString(fmt.Sprintf("[%s] ", delta.Severity))
+		fmt.Fprintf(builder, "[%s] ", delta.Severity)
 		renderer.WriteColor(builder, ColorReset)
 		builder.WriteString(delta.GuardName)
 		builder.WriteString("\n")
@@ -237,30 +248,43 @@ func RenderStabilityRegression(renderer *Renderer, regression StabilityRegressio
 
 	if regression.IsRegression {
 		renderer.WriteColor(builder, ColorFail)
-		builder.WriteString("Verdict: REGRESSION DETECTED\n")
+		builder.WriteString("Verdict: REGRESSION DETECTED\n\n")
 	} else {
 		renderer.WriteColor(builder, ColorPass)
-		builder.WriteString("Verdict: STABLE\n")
+		builder.WriteString("Verdict: STABLE\n\n")
 	}
 	renderer.WriteColor(builder, ColorReset)
 
+	const headerPad = 10
+
 	renderer.WriteColor(builder, ColorMuted)
-	builder.WriteString(fmt.Sprintf("Severity: %s\n", regression.Severity))
-	builder.WriteString(fmt.Sprintf("Reason:   %s\n\n", regression.Reason))
+	builder.WriteString(fmt.Sprintf("%-*s: %s\n", headerPad, "Severity", regression.Severity))
+	builder.WriteString(fmt.Sprintf("%-*s: %s\n\n", headerPad, "Reason", regression.Reason))
 
 	if !b.EarliestRun.IsZero() && !b.LatestRun.IsZero() {
 		span := formatTemporalSpan(b.LatestRun.Sub(b.EarliestRun))
-		builder.WriteString(fmt.Sprintf("Baseline Span: %s to %s %s\n", b.EarliestRun.Format(time.DateTime), b.LatestRun.Format(time.DateTime), span))
+		builder.WriteString(fmt.Sprintf("%-*s: %s (Span: %s to %s %s)\n",
+			headerPad, "Baseline",
+			formatIdentity(b.Identity),
+			b.EarliestRun.Format(time.DateTime),
+			b.LatestRun.Format(time.DateTime),
+			span,
+		))
 	}
+
 	if !t.EarliestRun.IsZero() && !t.LatestRun.IsZero() {
 		span := formatTemporalSpan(t.LatestRun.Sub(t.EarliestRun))
-		builder.WriteString(fmt.Sprintf("Target Span:   %s to %s %s\n", t.EarliestRun.Format(time.DateTime), t.LatestRun.Format(time.DateTime), span))
+		builder.WriteString(fmt.Sprintf("%-*s: %s (Span: %s to %s %s)\n",
+			headerPad, "Target",
+			formatIdentity(t.Identity),
+			t.EarliestRun.Format(time.DateTime),
+			t.LatestRun.Format(time.DateTime),
+			span,
+		))
 	}
 	builder.WriteString("\n")
-
 	renderer.WriteColor(builder, ColorReset)
 
-	// Tabular Stats Projection
 	renderer.WriteColor(builder, ColorMuted)
 	builder.WriteString(fmt.Sprintf("%-16s %12s -> %12s\n", "", "Baseline", "Target"))
 	renderer.WriteColor(builder, ColorReset)
@@ -371,4 +395,22 @@ func formatTemporalSpan(d time.Duration) string {
 		return fmt.Sprintf("(%dh %dm)", hours, minutes)
 	}
 	return fmt.Sprintf("(%dm)", minutes)
+}
+
+func formatIdentity(id SystemIdentity) string {
+	return fmt.Sprintf("%s (%s)", id.Version, id.Environment)
+}
+
+func validateSliceIdentityPurity(scenarios []ScenarioRunResult) (SystemIdentity, bool) {
+	if len(scenarios) == 0 {
+		return SystemIdentity{}, true
+	}
+
+	baselineID := scenarios[0].SnapshotConfig().Identity
+	for _, s := range scenarios[1:] {
+		if s.SnapshotConfig().Identity != baselineID {
+			return SystemIdentity{}, false
+		}
+	}
+	return baselineID, true
 }

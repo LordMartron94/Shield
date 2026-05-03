@@ -55,12 +55,30 @@ func SHIELD_Testing_Storage_ScenarioResultFindByID(
 }
 
 /*
-SHIELD_Testing_Storage_ScenarioResultFindByName fetches hydrated scenario
-aggregates for a given scenario name.
+SHIELD_Testing_Storage_ScenarioResultFindByName fetches hydrated scenario aggregates for a scenario name only.
+
+Identity fields are not filtered—all environments and versions sharing that name may appear. Prefer
+
+SHIELD_Testing_Storage_ScenarioResultFindByIdentity when cohorts must isolate Environment and Version columns.
 */
 func SHIELD_Testing_Storage_ScenarioResultFindByName(
 	engine *SHIELD_Testing_Storage_Engine,
 	name string,
 ) ([]*SHIELD_Testing_ScenarioRunResult, error) {
 	return internal.TestResultDatabaseScenarioResultFindByName(engine, name)
+}
+
+/*
+SHIELD_Testing_Storage_ScenarioResultFindByIdentity retrieves results whose scenario name matches name and whose
+
+persisted Environment and Version columns equal identity’s fields.
+
+Repository iteration order is undefined; consumers sorting by time should order StartedAt themselves.
+*/
+func SHIELD_Testing_Storage_ScenarioResultFindByIdentity(
+	engine *SHIELD_Testing_Storage_Engine,
+	name string,
+	identity SHIELD_Testing_SystemIdentity,
+) ([]*SHIELD_Testing_ScenarioRunResult, error) {
+	return internal.TestResultDatabaseScenarioResultFindByIdentity(engine, name, identity.Environment, identity.Version)
 }
