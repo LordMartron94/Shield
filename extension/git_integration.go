@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 
 	"shield"
@@ -39,6 +42,31 @@ func SystemIdentityFromGit(environment string, targetPath string) (shield.SHIELD
 		Environment: environment,
 	}, nil
 }
+
+/*
+SystemIdentityFromMarker retrieves the system identity by inspecting the physical location
+of a provided marker function. The markerFunc MUST be a function defined within the target
+submodule or package you wish to identify.
+*/
+func SystemIdentityFromMarker(environment string, markerFunc any) (shield.SHIELD_Testing_SystemIdentity, error) {
+	val := reflect.ValueOf(markerFunc)
+	if val.Kind() != reflect.Func {
+		return shield.SHIELD_Testing_SystemIdentity{}, errors.New("shield extension: markerFunc must be a function")
+	}
+
+	pc := val.Pointer()
+	fn := runtime.FuncForPC(pc)
+	if fn == nil {
+		return shield.SHIELD_Testing_SystemIdentity{}, errors.New("shield extension: could not determine function location")
+	}
+
+	file, _ := fn.FileLine(pc)
+	targetDir := filepath.Dir(file)
+
+	return SystemIdentityFromGit(environment, targetDir)
+}
+
+// ----------------------------------------------------------------- PRIVATE HELPERS
 
 func resolveGitHash(targetPath string) (string, error) {
 	cmd := exec.Command("git", "-C", targetPath, "rev-parse", "HEAD")
