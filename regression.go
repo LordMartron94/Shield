@@ -6,19 +6,13 @@ import (
 )
 
 /*
-SHIELD regression endpoints compare scenario run outcomes:
+SHIELD regression compares scenario outcomes: SHIELD_Regression_CheckIdentical performs pairwise deterministic deltas under
 
-- Pairwise deterministic comparison (`SHIELD_Regression_CheckIdentical`) for baseline/target runs executed under aligned fuzz snapshots
+aligned fuzz knobs plus matching SystemIdentity.Environment (Version may deliberately differ). SHIELD_Regression_CheckStability
 
-and matching SystemIdentity.Environment (Version may differ).
+consumes large homogeneous cohorts per Environment+Version. SQLite helpers load persisted aggregates; stability paths pair
 
-- Population stability comparison (`SHIELD_Regression_CheckStability`) for many baseline vs many target runs using asymptotic/statistical summaries;
-
-each cohort must be internally pure on Environment and Version.
-
-- Convenience loaders (`SHIELD_Regression_CheckIdenticalFromStorage`, `SHIELD_Regression_CheckStabilityFromStorage`) hydrate comparisons from SQLite via `SHIELD_Testing_Storage_*`; stability uses `SHIELD_Testing_Storage_ScenarioResultFindByIdentity` with explicit identities.
-
-All heavy logic lives under `shield/internal`; this file is a typed facade only.
+SHIELD_Testing_Storage_ScenarioResultFindByIdentity selections. Heavy logic stays in shield/internal—this file is a facade only.
 */
 
 func slicesFromStoredScenarioPointers(
@@ -34,27 +28,19 @@ func slicesFromStoredScenarioPointers(
 	return out, nil
 }
 
-/*
-SHIELD_Regression_Severity labels the kind of change detected when regressing guards or populations.
-
-Structured severities stringify to persisted/display values on the underlying `RegressionSeverity`; see constants below for discriminators usable in branching.
-*/
+// SHIELD_Regression_Severity enumerates guard or population change classes; string forms mirror persisted RegressionSeverity constants.
 type SHIELD_Regression_Severity = internal.RegressionSeverity
 
 /*
-SHIELD_Regression_Severity constants mirror internal severity tokens.
+SHIELD regression severity shorthand: Improvement means strictly better guard outcomes. OutcomeShift captures adverse pass/fail moves
 
-Interpretation shorthand:
+(identical runs include missing baseline guards; stability pairs it with significant pooled failure-rate shifts).
 
-Improvement → situation got strictly better relative to baseline for that guard or slice.
+SHIELD_Regression_Severity_FragilityShift persists as “FragilityIncrease” text—paired runs where both failed with identical guard
 
-OutcomeShift → pass/failure mass moved in an adverse direction (identical runs: pass→fail or a baseline guard missing from the target run); stability uses this after a pooled two-proportion test.
+FailureReason strings yet the target failed sooner on the fuzz iteration axis. SHIELD_Regression_Severity_Degradation persists as
 
-SHIELD_Regression_Severity_FragilityShift (serialised "FragilityIncrease") → paired identical runs only: both failed with the same SHIELD guard FailureReason string, but the target failed strictly earlier on the fuzz-iteration axis.
-
-SHIELD_Regression_Severity_Degradation (serialised "FailureDegradation") → paired identical runs only: both failed, and the stringified FailureReason telemetry differs between baseline and target before iteration is considered.
-
-None → no regressing severity for that delta or verdict.
+“FailureDegradation”—both failed but FailureReason strings diverged before iteration comparison. None suppresses regression polarity.
 */
 const (
 	SHIELD_Regression_Severity_None           = internal.RegressionSeverity_None
@@ -65,85 +51,45 @@ const (
 )
 
 /*
-SHIELD_Regression_GuardDelta reports one paired-guard divergence between deterministic baseline and target runs.
+SHIELD_Regression_GuardDelta reports one paired deterministic guard difference. Baseline order drives pairing; missing target guards
 
-Pairing walks baseline guard order and joins each row to the target run by guard name; extra target-only guards are ignored.
-
-When a baseline guard has no same-named target entry, TargetPassed is false and TargetReason documents the absence (OutcomeShift).
-
-Fields carry pass bits, recorded failed-iteration indices from each evaluation snapshot, and FailureReason strings as exposed by the testing API.
-
-Population stability checks emit no per-guard deltas; this structure is used by `SHIELD_Regression_CheckIdentical`.
+synthesize OutcomeShift rows. Stability analysis never fills this struct—CheckIdentical consumes it exclusively.
 */
 type SHIELD_Regression_GuardDelta = internal.GuardRegressionDelta
 
 /*
-SHIELD_Regression_Result packages `SHIELD_Regression_CheckIdentical` output.
+SHIELD_Regression_Result wraps CheckIdentical output: Sources retains [baseline,target] insertion order.
 
-[Fields]
+GuardDeltas includes only actionable severities plus informative Improvements filtered internally.
 
-`Sources`, when produced by identical comparison, retains `[baseline,target]` insertion order and stores each run by value inside the aggregate.
-
-`GuardDeltas` contains only severity-non-none guard transitions (internal filtering).
-
-`IsRegression` is true whenever any tracked delta bears OutcomeShift, Degradation, or FragilityShift severities under the internal polarity rules.
+IsRegression flips true when OutcomeShift, Degradation, or FragilityShift appear—Improvement alone does not.
 */
 type SHIELD_Regression_Result = internal.RegressionResult
 
 /*
-SHIELD_Regression_StabilityStats collapses repeated scenario executions into coarse rates.
+SHIELD_Regression_StabilityStats collapses many ScenarioRunResult rows into TotalRuns, FailedRuns, FailureRate, and mean
 
-TotalRuns mirrors slice length feeding stability evaluation.
+AverageFailedIter across failing runs only. Identity mirrors the enforced homogeneous SystemIdentity; EarliestRun/LatestRun bound
 
-FailedRuns counts runs whose aggregate guard verdict failed.
-
-FailureRate equals `FailedRuns / TotalRuns`.
-
-AverageFailedIter is the arithmetic mean (unsigned) over observed earliest failing iterations per failing run only; zero when no failures occurred.
-
-Identity echoes the homogeneous SystemIdentity taken from the first run (cohorts are validated before aggregation).
-
-EarliestRun/LatestRun bracket wall StartedAt timestamps spanning the slice; zero values mean the engine never stamped them (should not occur for real SHIELD runs).
-
-Consumers should treat ints as cardinality data and rates as fractions in `[0,1]` for successful slices.
+StartedAt samples (zero only if upstream forgets stamping). Consumers treat counts as cardinality and FailureRate fractions in [0,1].
 */
 type SHIELD_Regression_StabilityStats = internal.StabilityStats
 
 /*
-SHIELD_Regression_Stability_Result is the verdict object from stability comparison.
+SHIELD_Regression_Stability_Result is CheckStability’s verdict pairing Baseline/Target stats, Severity token, explanatory Reason,
 
-Baseline/Target embed `SHIELD_Regression_StabilityStats` for both populations examined.
-
-Severity encodes coarse classification identical to pairwise severities (`OutcomeShift` for statistically significant degradation, `FragilityIncrease` after Mann-Whitney analysis, otherwise `None`).
-
-Reason is a human-readable sentence suitable for telemetry; empty only if internal invariants violated (should not happen).
-
-`IsRegression` is true when Severities denote actionable regress according to Shield's phased rules.
+and IsRegression flagged when regression rules deem the population shift actionable.
 */
 type SHIELD_Regression_Stability_Result = internal.StabilityRegressionResult
 
 /*
-SHIELD_Regression_CheckIdentical performs deterministic pairwise regression between two finalized scenario runs.
+SHIELD_Regression_CheckIdentical enforces pairwise snapshot parity (Seed, FuzzingPattern, MaxIterations)
 
-[Algorithm]
+plus SystemIdentity.Environment equality before diffing guards; Version mismatch is tolerated so artifacts can advance while deployments
 
-Validated snapshot knobs (Seed, FuzzingPattern, MaxIterations) plus SystemIdentity.Environment parity must match exactly;
+stay comparable. Divergence yields wrapped errors annotated with the offending knob. Returned Sources preserves argument ordering.
 
-divergence aborts before guard comparison. Version labels are intentionally ignored for identical runs so software version
-
-bumps still compare deterministically when the deployment Environment stays aligned.
-
-Guard regression walks baseline `GuardResults` in order, resolving each name against the target run. For each pair: pass/fail flips map to Improvement or OutcomeShift; when both fail, Shield first compares FailureReason strings—any change yields FailureDegradation; if reasons match, strictly earlier target failure iteration yields FragilityIncrease (FragilityShift constant). Missing target guards synthesize an OutcomeShift row. Target-only guards are not compared. Deltas omit severities of None. Improvements are listed but do not set `IsRegression`.
-
-[Returns]
-
-Filled `Sources` preserving argument order `[baseline,target]`.
-
-[Errors]
-
-Malformed comparisons return wrapped errors distinguishing seed, fuzzing-pattern, max-iteration mismatch, or environment mismatch.
-
-Pure read-only function over supplied runs.
+Improvement deltas never assert IsRegression. Pure read-only over arguments.
 */
 func SHIELD_Regression_CheckIdentical(
 	baseline SHIELD_Testing_ScenarioRunResult,
@@ -153,35 +99,15 @@ func SHIELD_Regression_CheckIdentical(
 }
 
 /*
-SHIELD_Regression_CheckStability compares two populations (`baseline` slice vs `target` slice).
+SHIELD_Regression_CheckStability compares baseline vs target ScenarioRun slices (each len ≥50) under identical ConfidenceLevel semantics.
 
-[ Preconditions ]
+Slices must internally agree on SnapshotConfig.Identity Environment+Version or validation fails with contamination diagnostics.
 
-Each slice must contain at least 50 `ScenarioRunResult` entries (`len(slice) ≥ 50`); violating this yields a non-nil error with an explanatory wrapped message.
+Phase one applies a pooled two-proportion Z-test targeting strictly worse target failure fractions with p<alpha.
 
-Every run within a slice must share the same SnapshotConfig Identity (Environment and Version); mixed cohorts abort with a wrapped contamination error naming the offending index.
+Phase two optionally runs Mann-Whitney U on earliest failing iterations when populations include enough failures, flagging FragilityIncrease.
 
-ConfidenceLevel denotes the desired simultaneous confidence mass for asymptotic thresholds (converted internally to `alpha = 1 − confidenceLevel`).
-
-[ Algorithm Phases ]
-
-1. Failure-rate shift: pooled two-proportion Z-test comparing empirical failure fractions with cohort sizes drawn from lengths of each slice. Regression triggers only when asymptotic two-tailed p-value falls below `alpha` AND `target` failure fraction strictly worsens baseline.
-
-2. Fragility tightening: Provided each population recorded at least five failing runs with iterable indices, Shield applies Mann-Whitney U hypothesis testing (`statarch/hypothesis`) comparing earliest failing iteration envelopes. Statistical significance pairing with lowered target-average failing iteration declares `FragilityIncrease`.
-
-If neither criterion fires the verdict declares non-regression with neutral severity `None`.
-
-[Returns ]
-
-Filled `Baseline`/`Target` stats aggregates for observability, boolean regression flag, chosen severity semantic, explanatory string.
-
-[Pure Data Path ]
-
-Function does not persist results; callers integrate with storage voluntarily.
-
-[Errors ]
-
-Insufficient sample sizes and Identity mixture across a slice surface errors; numerical degeneracies propagate as finite floats inside stats without auxiliary errors today.
+Otherwise severity None emerges. Does not persist; numerical edge cases reuse finite floats inside stats without auxiliary errors today.
 */
 func SHIELD_Regression_CheckStability(
 	baseline []SHIELD_Testing_ScenarioRunResult,
@@ -192,17 +118,9 @@ func SHIELD_Regression_CheckStability(
 }
 
 /*
-SHIELD_Regression_CheckIdenticalFromStorage loads two aggregates by persisted IDs and evaluates identical-regression parity.
+SHIELD_Regression_CheckIdenticalFromStorage loads baseline/target aggregates by persisted id through SHIELD_Testing_Storage_ScenarioResultFindByID,
 
-baselineResultID selects the authoritative row; targetResultID selects the candidate row inside the configured storage engine.
-
-[Side Effects]
-
-Performs SQLite reads (`SHIELD_Testing_Storage_ScenarioResultFindByID`) ensuring the transactional connection lifecycle managed by callers.
-
-Returns the same RegressionResult semantics as manual `SHIELD_Regression_CheckIdentical` invocation.
-
-Both IDs must correspond to materially comparable scenarios; IDs missing from storage propagate repository errors verbatim.
+then executes CheckIdentical. Missing IDs bubble repository errors verbatim; caller manages transactional engine lifecycle.
 */
 func SHIELD_Regression_CheckIdenticalFromStorage(
 	engine *SHIELD_Testing_Storage_Engine,
@@ -224,19 +142,11 @@ func SHIELD_Regression_CheckIdenticalFromStorage(
 }
 
 /*
-SHIELD_Regression_CheckStabilityFromStorage gathers stored cohort aggregates for paired scenario names across optional distinct engines before delegating stability analysis.
+SHIELD_Regression_CheckStabilityFromStorage loads baseline and target populations via SHIELD_Testing_Storage_ScenarioResultFindByIdentity,
 
-baselineIdentity and targetIdentity funnel into `SHIELD_Testing_Storage_ScenarioResultFindByIdentity` so populations never mix Environment/Version columns across the query.
+mirroring Scenario names plus explicit identities, optionally across two engines. Rows arrive in repository order—sort externally if
 
-baselineEngine/baselineScenarioName designates the authoritative population; targetEngine/targetScenarioName designates the challenger population.
-
-Use the same engine pointer twice when both cohorts share one SQLite ledger but differing scenarios or identities.
-
-Ordering note:
-
-Stored rows follow repository iteration order for the compound filter. Sort by StartedAt if chronological analysis matters.
-
-ConfidenceLevel behaves identically to `SHIELD_Regression_CheckStability` once slices hydrate.
+timeline analytics matter. ConfidenceLevel then mirrors CheckStability once slices hydrate and nil aggregates are rejected.
 */
 func SHIELD_Regression_CheckStabilityFromStorage(
 	baselineEngine *SHIELD_Testing_Storage_Engine,

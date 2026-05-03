@@ -1,11 +1,12 @@
 /*
 Package shield is a structured validation and regression harness.
 
-Exercise scenarios through the `testing` surface (`SHIELD_Testing_*`) supplying `SHIELD_Testing_SystemIdentity`, hydrate prior snapshot configs for replay helpers, optionally persist aggregates via `SHIELD_Testing_Storage_*` (identity-scoped cohort queries),
+Run scenarios via SHIELD_Testing_* with mandatory SHIELD_Testing_SystemIdentity, replay prior snapshots,
 
-and compare runs or fleets through `SHIELD_Regression_*` with environment-aware pairwise checks and homogeneous stability cohort validation.
-Compare runs with `SHIELD_Regression_CheckIdentical`; compare fleets with `SHIELD_Regression_CheckStability`. Load cohorts from SQLite via `SHIELD_Regression_CheckIdenticalFromStorage` and `SHIELD_Regression_CheckStabilityFromStorage` in `regression.go`.
+persist aggregates through SHIELD_Testing_Storage_* (including identity-filtered lookups and cohort version discovery),
 
-Format ScenarioRunResult slices plus identical or stability regression verdicts via `SHIELD_Rendering_*` in `rendering.go`.
+and compare pairwise or populations with SHIELD_Regression_* plus optional SQLite loaders.
+
+Render ScenarioRun slices and regression verdicts via SHIELD_Rendering_* in rendering.go.
 */
 package shield

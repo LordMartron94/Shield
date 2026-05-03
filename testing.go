@@ -8,141 +8,91 @@ import (
 )
 
 /*
-This is the testing endpoint for SHIELD.
+This file hosts SHIELD testing facades spanning data-driven scenarios, fuzzing, SystemIdentity-bearing snapshots,
 
-Features:
-- Data-Driven Testing Setup
-- Fuzzing system
-- SystemIdentity on every run snapshot (storage + regression filters)
-- Operation-scoped lifecycle with deferred teardown; framework panics become synthetic ScenarioRunResults
-- Snapshot-driven ScenarioRunConfig reconstruction and SQLite-backed replays (`SHIELD_Testing_ScenarioRunReplay*` / `*_FromSnapshot`)
+Operation lifecycles, and SQLite-backed replay bundles.
 */
 
 /*
-SHIELD_Testing_GuardPolicy defines a single, composable truth rule for a guard.
-
-Policies are evaluated sequentially by the Engine. If a policy fails,
-the evaluation halts and the failure reason is recorded in the telemetry.
+SHIELD_Testing_GuardPolicy defines composable evaluation rules enforced sequentially until failure halts telemetry capture.
 */
 type SHIELD_Testing_GuardPolicy[TOutput any] = internal.GuardPolicy[TOutput]
 
 /*
-SHIELD_Testing_ScenarioRunConfig sets runtime configuration for a scenario.
+SHIELD_Testing_ScenarioRunConfig carries ScenarioRun knobs including mandatory SHIELD_Testing_SystemIdentity—
 
-Identity must carry non-empty Environment and Version strings; SHIELD_Testing_ScenarioRun panics otherwise so every
-
-persisted row carries an explicit system lineage. Identity is copied verbatim into SnapshotConfig on the result.
+blank Environment or Version triggers an engine panic and every persisted row echoes the lineage back through SnapshotConfig.
 */
 type SHIELD_Testing_ScenarioRunConfig = internal.ScenarioRunConfig
 
 /*
-SHIELD_Testing_SnapshotConfig is the immutable snapshot carried by ScenarioRunResult.SnapshotConfig().
+SHIELD_Testing_SnapshotConfig is the immutable ScenarioRun telemetry bundle exposing seed, fuzz pattern, scheduling limits,
 
-# It bundles seed, fuzzing pattern, iteration or duration caps, UseDuration, entropy provider diagnostic string, and
-
-Identity (environment + version last seen when the run executed). Storage round-trips those fields; replay helpers
-
-project them back into SHIELD_Testing_ScenarioRunConfig via SHIELD_Testing_ScenarioRunConfigFromSnapshot.
+entropy provider tagging, plus Identity fingerprints for storage, regression validators, rendering, and replay reconstruction.
 */
 type SHIELD_Testing_SnapshotConfig = internal.SnapshotConfig
 
 /*
-SHIELD_Testing_InputGenerator generates an input based on a seed and iteration number.
+SHIELD_Testing_InputGenerator derives deterministic Scenario inputs keyed by entropy seed plus iteration ordinal.
 
-NOTE: In order for this to work properly, the generated input MUST be DETERMINISTIC relative to seed and iteration.
+Generators must stay deterministic versus those inputs—non-deterministic branches break replay guarantees outright.
 */
 type SHIELD_Testing_InputGenerator[TInput any] = internal.InputGenerator[TInput]
 
 /*
-SHIELD_Testing_ZonePath represents a zone (group) of scenarios.
+SHIELD_Testing_ZonePath attaches metadata breadcrumbs (suite/module style) untouched by Scenario execution yet consumed by renders,
 
-This can be treated as metadata and is not used by the execution engine.
-Only the rendering engine and/or downstream systems (can) make use of this.
+SQLite zone_path columns, Operation attribution, etc.
 */
 type SHIELD_Testing_ZonePath = internal.ZonePath
 
 /*
-SHIELD_Testing_SystemIdentity scopes telemetry to a deployment context and build label.
+SHIELD_Testing_SystemIdentity couples Environment tier labels (such as staging) with Version strings labeling software artifacts.
 
-Environment names the logical tier (for example ci, staging). Version names the software artefact or commit label you
+Both strings must populate ScenarioRun configs. Pairwise regressions insist on Environment alignment while tolerating differing Versions;
 
-want regression filters to key on. Both must be non-empty for SHIELD_Testing_ScenarioRun.
-
-Identical pairwise regression requires matching Environment (Version may differ); cohort stability requires every run in a
-
-slice share the same Environment and Version; storage FindByIdentity narrows rows by scenario name plus both fields.
+storage identity queries and cohort statistics require homogeneous env+Version slices alongside SHIELD_Testing_Storage_GetCohortVersions discovery.
 */
 type SHIELD_Testing_SystemIdentity = internal.SystemIdentity
 
-/*
-SHIELD_Testing_ZonePathCreate builds a metadata zone path from ordered segment strings.
-
-Segments are preserved in order from outer to inner grouping (for example suite, then module).
-The execution engine ignores this path; storage, reports, or other tooling may use it to
-navigate or filter scenarios. Passing no parts yields an empty path, which is valid.
-*/
+// SHIELD_Testing_ZonePathCreate stitches ordered zone segments into a metadata path (empty parts remain valid sentinel paths).
 func SHIELD_Testing_ZonePathCreate(parts ...string) SHIELD_Testing_ZonePath {
 	return internal.ZonePathCreate(parts...)
 }
 
 /*
-SHIELD_Testing_ZonePathCreateFromString parses a single string into a zone path using separator.
+SHIELD_Testing_ZonePathCreateFromString splits path on separator much like strings.Split—empty input yields a single empty segment,
 
-Every substring between occurrences of separator becomes one segment; order matches the source
-left to right. For example ("a/b/c", "/") yields the same segments as ZonePathCreate("a", "b", "c").
-If path is empty, the result is one empty segment as produced by strings.Split. A non-empty path
-that contains no separator becomes a single-segment path. The separator is not trimmed from
-individual segments—normalize input if that matters for your tooling.
+non-empty strings without separators become one segment, and trimming never happens automatically.
 */
 func SHIELD_Testing_ZonePathCreateFromString(path string, separator string) SHIELD_Testing_ZonePath {
 	return internal.ZonePathCreateFromString(path, separator)
 }
 
-/*
-SHIELD_Testing_GuardPolicyMustNotPanic enforces a Phase 1 (Severity 0) hardware/state trap.
-
-If the executor panics, the Engine will catch it, fail the guard immediately,
-and append the recovered panic message to the telemetry.
-*/
+// SHIELD_Testing_GuardPolicyMustNotPanic traps unexpected panics as guard failures with recovered diagnostics.
 func SHIELD_Testing_GuardPolicyMustNotPanic[TOutput any]() SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyMustNotPanic[TOutput]()
 }
 
-/*
-SHIELD_Testing_GuardPolicyMustPanic enforces an expected failure state.
-
-The guard will only pass if the executor panics. If the executor returns normally
-or returns an error, the guard fails.
-*/
+// SHIELD_Testing_GuardPolicyMustPanic expects panics; normal returns or errors fail the guard.
 func SHIELD_Testing_GuardPolicyMustPanic[TOutput any]() SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyMustPanic[TOutput]()
 }
 
-/*
-SHIELD_Testing_GuardPolicyMustNotError enforces a Phase 2 (Severity 1) logic trap.
-
-If the executor returns a non-nil error, the guard fails and the error string
-is recorded. This policy implicitly requires that no panics occur prior to evaluation.
-*/
+// SHIELD_Testing_GuardPolicyMustNotError fails when executors return non-nil errors (post-panic phase).
 func SHIELD_Testing_GuardPolicyMustNotError[TOutput any]() SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyMustNotError[TOutput]()
 }
 
-/*
-SHIELD_Testing_GuardPolicyMustError ensures the executor yields a valid Go error.
-
-The guard fails if the executor returns a nil error.
-*/
+// SHIELD_Testing_GuardPolicyMustError forces a non-nil Go error from the executor.
 func SHIELD_Testing_GuardPolicyMustError[TOutput any]() SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyMustError[TOutput]()
 }
 
 /*
-SHIELD_Testing_GuardPolicyMustNotEqual validates that the output diverges from a banned value.
+SHIELD_Testing_GuardPolicyMustNotEqual rejects outputs matching notExpected using caller-provided structural equality plus string
 
-Because the Engine operates on generic memory, the client must inject the 'comparator'
-to define structural equality, and a 'formatter' to translate the generic memory into
-a readable string for the telemetry diff if the policy fails.
+formatters for telemetry diffs.
 */
 func SHIELD_Testing_GuardPolicyMustNotEqual[TOutput any](
 	comparator func(actual, notExpected TOutput) bool,
@@ -153,11 +103,7 @@ func SHIELD_Testing_GuardPolicyMustNotEqual[TOutput any](
 }
 
 /*
-SHIELD_Testing_GuardPolicyMustEqual validates that the output matches a strict expectation.
-
-Because the Engine operates on generic memory, the client must inject the 'comparator'
-to define structural equality, and a 'formatter' to translate the generic memory into
-a readable string (e.g., "expected X, got Y") for the telemetry diff upon failure.
+SHIELD_Testing_GuardPolicyMustEqual mirrors MustNotEqual but asserts equality with expected outputs using the same comparator/formatter contract.
 */
 func SHIELD_Testing_GuardPolicyMustEqual[TOutput any](
 	comparator func(actual, expected TOutput) bool,
@@ -167,29 +113,18 @@ func SHIELD_Testing_GuardPolicyMustEqual[TOutput any](
 	return internal.GuardPolicyMustEqual(comparator, formatter, expected)
 }
 
-/*
-SHIELD_Testing_GuardPolicyPredicate serves as the escape hatch for complex DOD evaluations.
-
-Use this when strict equality is insufficient (e.g., checking numeric ranges,
-regex matching, or deep nested structural assertions). The predicate must return
-false and a contextual reason string if the actual output is invalid.
-*/
+// SHIELD_Testing_GuardPolicyPredicate provides arbitrary property checks returning pass/fail plus textual rationale.
 func SHIELD_Testing_GuardPolicyPredicate[TOutput any](
 	predicate func(actual TOutput) (passed bool, reason string),
 ) SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyPredicate(predicate)
 }
 
-/*
-SHIELD_Testing_Guard represents a single check for a given test.
-
-Alternatively one could think of this as an invariant that must hold true,
-or a claim to be evaluated.
-*/
+// SHIELD_Testing_Guard binds policies to generated inputs for a named defensive claim.
 type SHIELD_Testing_Guard[TInput, TOutput any] = internal.Guard[TInput, TOutput]
 
 /*
-SHIELD_Testing_GuardCreate creates a single guard with a single input to be executed on a scenario.
+SHIELD_Testing_GuardCreate configures a deterministic single-input guard; SHIELD_Testing_GuardCreate_Fuzzed swaps in generative iterators.
 */
 func SHIELD_Testing_GuardCreate[TInput, TOutput any](
 	name string,
@@ -203,9 +138,6 @@ func SHIELD_Testing_GuardCreate[TInput, TOutput any](
 	}, false, policies...)
 }
 
-/*
-SHIELD_Testing_GuardCreate_Fuzzed creates a single guard with a fuzzer to be executed on a scenario.
-*/
 func SHIELD_Testing_GuardCreate_Fuzzed[TInput, TOutput any](
 	name string,
 	inputGenerator SHIELD_Testing_InputGenerator[TInput],
@@ -214,29 +146,17 @@ func SHIELD_Testing_GuardCreate_Fuzzed[TInput, TOutput any](
 	return internal.GuardCreate(name, inputGenerator, true, policies...)
 }
 
-/*
-SHIELD_Testing_Executor is a single executor which scenarios use to execute.
-*/
+// SHIELD_Testing_Executor is Scenario-scoped runnable logic feeding guard evaluation.
 type SHIELD_Testing_Executor[TInput, TOutput any] = internal.Executor[TInput, TOutput]
 
-/*
-SHIELD_Testing_ScenarioRunResult describes a single scenario's result.
-*/
+// SHIELD_Testing_ScenarioRunResult captures telemetry for one Scenario invocation.
 type SHIELD_Testing_ScenarioRunResult = internal.ScenarioRunResult
 
-/*
-SHIELD_Testing_Scenario represents a "theory" for what is supposed to happen after an execution.
-
-It holds an array of guards to defend a piece of behaviour.
-*/
+// SHIELD_Testing_Scenario groups guards protecting a single executor under Scenario metadata (name + zone path).
 type SHIELD_Testing_Scenario[TInput, TOutput any] = internal.Scenario[TInput, TOutput]
 
 /*
-SHIELD_Testing_ScenarioCreate constructs a single scenario ready to run.
-
-Optional trailing zone arguments form the scenario's metadata ZonePath via
-SHIELD_Testing_ZonePathCreate (suite/module-style grouping). Omitted zones use an empty path.
-Execution does not consume zones; results and integrations expose them through ZonePath accessors.
+SHIELD_Testing_ScenarioCreate builds Scenarios whose optional trailing zones feed SHIELD_Testing_ZonePathCreate—execution ignores them besides snapshot metadata emission.
 */
 func SHIELD_Testing_ScenarioCreate[TInput, TOutput any](
 	name string,
@@ -248,11 +168,7 @@ func SHIELD_Testing_ScenarioCreate[TInput, TOutput any](
 	return internal.ScenarioCreate(name, guards, executor, zonePath)
 }
 
-/*
-SHIELD_Testing_ScenarioRun executes scenario under runConfig including mandatory Identity.
-
-Violating Identity invariants (blank Environment or Version) panics as a framework misuse error from the engine.
-*/
+// SHIELD_Testing_ScenarioRun executes scenario honoring runConfig including mandatory Identity; invalid Identity triggers engine panic messaging.
 func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
 	scenario SHIELD_Testing_Scenario[TInput, TOutput],
 	runConfig SHIELD_Testing_ScenarioRunConfig,
@@ -261,19 +177,11 @@ func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
 }
 
 /*
-SHIELD_Testing_ScenarioRunConfigFromSnapshot materializes a runnable config from a prior SnapshotConfig.
+SHIELD_Testing_ScenarioRunConfigFromSnapshot rebuilds ScenarioRunConfig from Snapshot mirrors: SeedOverride copies snapshot.Seed,
 
-# SeedOverride receives snapshot.Seed so ScenarioRun matches the stored trajectory when combined with the same entropy
+fuzz limits and Identity flow unchanged, entropy factories pass through (nil keeps MixSplit defaults).
 
-factory semantics. FuzzingPattern, MaxIterations or MaxDuration, UseDuration, and Identity copy across directly.
-
-entropyProviderFactory passes through unchanged; nil keeps SHIELD’s default MixSplit128 provider while still fixing the seed.
-
-# SnapshotConfig.ProviderID remains diagnostic only—bit-identical entropy plumbing versus the original run requires a factory
-
-honoring that identifier when your pipeline relies on it.
-
-Identity must stay non-empty exactly as when the snapshot was produced; otherwise ScenarioRun still panics before work begins.
+ProviderID stays diagnostic—recreate original entropy plumbing via custom factories when fidelity demands it.
 */
 func SHIELD_Testing_ScenarioRunConfigFromSnapshot(
 	snapshot SHIELD_Testing_SnapshotConfig,
@@ -283,17 +191,9 @@ func SHIELD_Testing_ScenarioRunConfigFromSnapshot(
 }
 
 /*
-SHIELD_Testing_ScenarioRunReplayFromStoredAggregate replays scenario using the snapshot embedded in a persisted row
+SHIELD_Testing_ScenarioRunReplayFromStoredAggregate replays Scenario definitions against snapshots embedded in hydrated aggregates without SQLite round trips.
 
-(or any hydrated aggregate) without touching SQLite again.
-
-stored must be non-nil. entropyProviderFactory follows SHIELD_Testing_ScenarioRunConfigFromSnapshot.
-
-# The callable scenario definition (guards, executor, zone metadata) is supplied independently—this reapplies knobs plus
-
-Identity from stored.SnapshotConfig(). Mismatch between scenario and stored scenario name or shape is intentional for
-
-bisection; Identity from the row is always replayed verbatim.
+stored must stay non-nil; factories match ScenarioRunConfigFromSnapshot semantics. Callers intentionally may diverge Scenario shape from persisted names while Identity always echoes the stored Snapshot exactly.
 */
 func SHIELD_Testing_ScenarioRunReplayFromStoredAggregate[TInput, TOutput any](
 	scenario SHIELD_Testing_Scenario[TInput, TOutput],
@@ -309,11 +209,7 @@ func SHIELD_Testing_ScenarioRunReplayFromStoredAggregate[TInput, TOutput any](
 }
 
 /*
-SHIELD_Testing_ScenarioRunReplayFromStorageByID hydrates persistedResultID via SHIELD_Testing_Storage_ScenarioResultFindByID,
-
-then invokes SHIELD_Testing_ScenarioRunReplayFromStoredAggregate with the fetched row.
-
-Storage errors propagate; the replay result reflects a fresh ScenarioRun invocation under the revived configuration.
+SHIELD_Testing_ScenarioRunReplayFromStorageByID composes ScenarioResultFindByID with ReplayFromStoredAggregate so SQLite ids revive historical configurations automatically.
 */
 func SHIELD_Testing_ScenarioRunReplayFromStorageByID[TInput, TOutput any](
 	engine *SHIELD_Testing_Storage_Engine,
@@ -330,41 +226,17 @@ func SHIELD_Testing_ScenarioRunReplayFromStorageByID[TInput, TOutput any](
 }
 
 /*
-SHIELD_Testing_Operation groups scenarios that share expensive setup state.
+SHIELD_Testing_Operation models shared setup across multiple Scenario executions—startup allocates state, runScenarios fans out,
 
-After successful startup the runner calls runScenarios, snapshots WallDuration and sums, then runs deferred teardown.
-
-Startup error or panic skips user scenarios yet still records synthetic Operation_Startup_Failure telemetry.
-
-Panic inside runScenarios or teardown is recovered inside the runner, translated into Operation_Execution_Failure
-
-or appended Operation_Teardown_Failure rows, and does not escape to callers of SHIELD_Testing_OperationRun.
-
-Passed is false on any constituent scenario failure or any synthetic fault row. Teardown is skipped when startup never succeeds.
-
-Zone segments mirror ScenarioCreate trailing zones—metadata-only on attribution.
+defer’d teardown executes even when inner batches panic internally, emitting synthetic ScenarioRun scaffolding on faults.
 */
 type SHIELD_Testing_Operation[TState any] = internal.Operation[TState]
 
-/*
-SHIELD_Testing_OperationRunResult aggregates WallDuration (pre-teardown snapshot), summed scenario durations,
-
-and scenario rows—including synthetic framing rows emitted on framework faults. StartedAt anchors OperationRun entry.
-*/
+// SHIELD_Testing_OperationRunResult aggregates nested Scenario summaries plus framing synthetic rows on framework anomalies.
 type SHIELD_Testing_OperationRunResult = internal.OperationRunResult
 
 /*
-SHIELD_Testing_OperationCreate configures an Operation with lifecycle hooks.
-
-Trailing zone strings map through SHIELD_Testing_ZonePathCreate like ScenarioCreate—metadata only.
-
-When startup returns `(state, nil)` without recovering a panic the runner invokes runScenarios(state); failures or panics therein never escape.
-
-Deferred teardown always runs once startup succeeds, after WallDuration bookkeeping; teardown panic appends synthetic Operation_Teardown_Failure.
-
-runScenarios usually loops SHIELD_Testing_ScenarioRun while reusing or layering run configuration—the config’s Identity
-
-must remain valid on every inner call.
+SHIELD_Testing_OperationCreate registers lifecycle closures plus trailing zone segments like ScenarioCreate; inner ScenarioRun iterations must continuously supply compliant Identity payloads when they embed configs reused across loops.
 */
 func SHIELD_Testing_OperationCreate[TState any](
 	name string,
@@ -377,13 +249,7 @@ func SHIELD_Testing_OperationCreate[TState any](
 	return internal.OperationCreate(name, zonePath, startup, teardown, runScenarios)
 }
 
-/*
-SHIELD_Testing_OperationRun executes startup, guarded runScenarios, aggregation snapshot, deferred teardown,
-
-and yields OperationRunResult without propagating panics—framework faults materialize as synthetic telemetry instead.
-
-Caller passes `&operation` populated by OperationCreate.
-*/
+// SHIELD_Testing_OperationRun executes guarded startup/scenario/teardown choreography returning OperationRun aggregates without bubbling panics to callers.
 func SHIELD_Testing_OperationRun[TState any](operation *SHIELD_Testing_Operation[TState]) SHIELD_Testing_OperationRunResult {
 	return internal.OperationRun(operation)
 }

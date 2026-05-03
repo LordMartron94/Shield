@@ -3,15 +3,11 @@ package shield
 import "shield/internal"
 
 /*
-SHIELD_Rendering_ColorMode selects how escape sequences color SHIELD textual reports.
+SHIELD_Rendering_ColorMode selects how ANSI escape sequences color SHIELD textual reports. None strips color bytes (pipes, logs).
 
-None emits no ANSI bytes (pipes, persisted logs).
+ANSI16 uses sixteen-color ECMA-48 foreground SGR codes. True emits 24-bit RGB tuned for typical dark terminals.
 
-ANSI16 uses standard ECMA-48 sixteen-colour foreground SGR sequences.
-
-True uses 24-bit foreground RGB tuned for typical dark-terminal backgrounds.
-
-Unrecognized numeric modes and the zero value map to None when SHIELD_Rendering_RendererCreate initializes palettes.
+Unrecognized numeric modes and the zero value map to None once SHIELD_Rendering_RendererCreate wires palettes.
 */
 type SHIELD_Rendering_ColorMode = internal.RenderingColorMode
 
@@ -21,18 +17,10 @@ const (
 	SHIELD_Rendering_Color_True   SHIELD_Rendering_ColorMode = internal.Render_Color_True
 )
 
-/*
-SHIELD_Rendering_Configuration binds SHIELD_Rendering_RendererCreate inputs.
-
-Currently this only snapshots ColorMode while leaving room for future toggles without breaking call sites again.
-*/
+// SHIELD_Rendering_Configuration binds SHIELD_Rendering_RendererCreate inputs; today it only snapshots ColorMode for forward-compatible extension.
 type SHIELD_Rendering_Configuration = internal.RenderingConfiguration
 
-/*
-SHIELD_Rendering_ConfigurationCreate wraps RenderingConfigurationCreate for public callers.
-
-colorMode chooses the backing palette SHIELD_Rendering_RendererCreate wires; unset or unrecognized values degrade to SHIELD_Rendering_Color_None semantics.
-*/
+// SHIELD_Rendering_ConfigurationCreate builds config; colorMode chooses palettes, with unknown values degrading to SHIELD_Rendering_Color_None semantics.
 func SHIELD_Rendering_ConfigurationCreate(
 	colorMode SHIELD_Rendering_ColorMode,
 ) *SHIELD_Rendering_Configuration {
@@ -40,37 +28,27 @@ func SHIELD_Rendering_ConfigurationCreate(
 }
 
 /*
-SHIELD_Rendering_Renderer fronts fixed palette tables for SHIELD_Rendering_FormatScenarioRunResults,
+SHIELD_Rendering_Renderer fronts immutable palette tables consumed by the Format* entry points.
 
-SHIELD_Rendering_FormatIdenticalRegressionReport, and SHIELD_Rendering_FormatStabilityRegressionReport.
+Construct via SHIELD_Rendering_RendererCreate only; shared Renderer pointers stay safe under concurrent formatting because
 
-Construct exclusively via SHIELD_Rendering_RendererCreate; shared Renderer handles stay safe across concurrent format calls because palettes never mutate post-create and builders stay local per invocation (orthogonal to ScenarioRun SystemIdentity fields).
+post-create palettes never mutate and strings.Builder scratch stays per call (orthogonal to ScenarioRun SystemIdentity stamping).
 */
 type SHIELD_Rendering_Renderer = internal.Renderer
 
-/*
-SHIELD_Rendering_RendererCreate maps cfg into a Renderer with matching palette bindings.
-
-Reuse the returned pointer across batches; cfg must not be nil.
-*/
+// SHIELD_Rendering_RendererCreate maps cfg into a Renderer with matching palette routing; cfg must be non-nil.
 func SHIELD_Rendering_RendererCreate(cfg *SHIELD_Rendering_Configuration) *SHIELD_Rendering_Renderer {
 	return internal.RendererCreate(cfg)
 }
 
 /*
-SHIELD_Rendering_FormatScenarioRunResults returns a textual “SHIELD DEFENCE REPORT” for the supplied ScenarioRunResults.
+SHIELD_Rendering_FormatScenarioRunResults emits the text “SHIELD DEFENCE REPORT”. Empty input yields “No scenarios executed.”
 
-Empty input emits “No scenarios executed.” plus newline. Otherwise emits a Context line summarising SystemIdentity when
+Otherwise it prints Context (homogeneous SystemIdentity or “<Mixed Batch>”), aggregate scenario timing summary, optional first-run
 
-every row agrees; mixed Identity batches print “<Mixed Batch>” before scenario counts, aggregate wall versus summed
+stamp, then a zone breadcrumb tree sorted in-place by ZonePath.Render("."). renderer must be non-nil from RendererCreate.
 
-durations, optional first-run execution timestamp, zone tree sorted stably by ZonePath.Render("."),
-
-and per-scenario pass markers with failing-guard FailureReason lines.
-
-renderer must originate from SHIELD_Rendering_RendererCreate; nil panics inside renderer wiring.
-
-Sorts scenarios in-place (stable) by each row’s ZonePath.Render("."); clone the slice before calling when callers must preserve the incoming order.
+The input slice is reordered stable-sort by zone path; clone first if callers rely on original ordering.
 */
 func SHIELD_Rendering_FormatScenarioRunResults(
 	renderer *SHIELD_Rendering_Renderer,
@@ -80,25 +58,13 @@ func SHIELD_Rendering_FormatScenarioRunResults(
 }
 
 /*
-SHIELD_Rendering_FormatIdenticalRegressionReport turns a pairwise SHIELD_Regression_Result from
+SHIELD_Rendering_FormatIdenticalRegressionReport renders SHIELD_Regression_CheckIdentical outcomes (or storage twins) for terminals.
 
-SHIELD_Regression_CheckIdentical (or Storage twin) into a terminal-oriented summary.
+# It prints the pairwise header, verdict coloring, optional dual-run SystemIdentity timelines, then either a muted “no deltas” line
 
-Outputs a labelled header (“SHIELD IDENTICAL REGRESSION REPORT”), pass/fail verdict coloring
+or bullet guard transitions with baseline/target PASS traces. renderer must be non-nil.
 
-(STABLE / IMPROVED versus REGRESSION DETECTED from IsRegression). When Sources carries two runs it prints each side’s
-
-SystemIdentity plus wall StartedAt stamp before deltas. With GuardDeltas empty a muted “no deltas” sentence appears;
-
-otherwise each retained delta emits severity token, guard name, and indented baseline/target PASS versus FAIL rows with fuzz
-
-iteration snippets plus stitched reason strings.
-
-Improvement deltas use pass hues; regressing severities use fail hues; severity None deltas use muted styling if ever present.
-
-Does not reorder report fields or mutate RegressionResult; purely allocates through strings.Builder wiring.
-
-renderer must come from SHIELD_Rendering_RendererCreate (nil dereferences internally).
+The function does not mutate RegressionResult and only allocates transient builder memory.
 */
 func SHIELD_Rendering_FormatIdenticalRegressionReport(
 	renderer *SHIELD_Rendering_Renderer,
@@ -108,17 +74,13 @@ func SHIELD_Rendering_FormatIdenticalRegressionReport(
 }
 
 /*
-SHIELD_Rendering_FormatStabilityRegressionReport formats StabilityRegressionResult from SHIELD_Regression_CheckStability
+SHIELD_Rendering_FormatStabilityRegressionReport lays out SHIELD_Regression_CheckStability verdicts (or storage-hydrated equivalents).
 
-(or Storage hydrator): cohort verdict line, enumerated Severity plus Reason excerpt, then—for each side when temporal data
+After severity and reason text it may print each cohort’s SystemIdentity alongside earliest/latest StartedAt span language, then the
 
-exists—the cohort SystemIdentity, earliest and latest StartedAt timestamps, and span wording before the tabular stats.
+tabular totals, failure-rate deltas, and mean earliest-failure iterations. Pure emission only; renderer must follow the same lifecycle
 
-The table lists total runs, conditional-highlighted failure-rate deltas, and mean earliest-failing iteration (“Mean Fragility”)
-
-when targets fail sooner on average while the target cohort logged failures.
-
-Pure string emission only—no mutation of StabilityRegressionResult. renderer wiring constraints match the other rendering entry points.
+rules as the other formatters.
 */
 func SHIELD_Rendering_FormatStabilityRegressionReport(
 	renderer *SHIELD_Rendering_Renderer,

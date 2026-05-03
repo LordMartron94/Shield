@@ -398,6 +398,73 @@ func TestResultDatabaseScenarioResultFindByIdentity(
 	return results, nil
 }
 
+// --------------------------------------------------------------- DISCOVERY
+
+// CohortVersionRecord is one DISTINCT persisted Version label for a scenario_name + environment cohort: LastSeen mirrors MAX(row_timestamp) and RunCount counts associated rows independent of pass/fail verdicts.
+type CohortVersionRecord struct {
+	Version  string
+	LastSeen time.Time
+	RunCount int
+}
+
+// TestResultDatabaseGetCohortVersions groups SQLite rows by Version, orders groups by descending MAX(timestamp), and caps DISTINCT results with limit (SQL semantics: limit ≤0 usually returns empty).
+func TestResultDatabaseGetCohortVersions(
+	db *TestResultDatabase,
+	name string,
+	environment string,
+	limit int,
+) ([]CohortVersionRecord, error) {
+	if err := testResultDatabaseEnsureOpen(db); err != nil {
+		return nil, err
+	}
+
+	// We use a raw query here because we are aggregating metadata, not hydrating full entities.
+	query := fmt.Sprintf(`
+		SELECT 
+			%s as version, 
+			MAX(%s) as last_seen,
+			COUNT(%s) as run_count
+		FROM %s 
+		WHERE %s = ? AND %s = ? 
+		GROUP BY %s 
+		ORDER BY last_seen DESC 
+		LIMIT ?`,
+		colVersion, colTimestamp, colScenarioID,
+		testResultsTableName,
+		colScenarioName, colEnvironment,
+		colVersion,
+	)
+
+	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query, name, environment, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query cohort versions: %w", err)
+	}
+	defer rows.Close()
+
+	var records []CohortVersionRecord
+	for rows.Next() {
+		var version string
+		var lastSeenMs int64
+		var count int
+
+		if err := rows.Scan(&version, &lastSeenMs, &count); err != nil {
+			return nil, fmt.Errorf("failed to scan cohort version row: %w", err)
+		}
+
+		records = append(records, CohortVersionRecord{
+			Version:  version,
+			LastSeen: time.UnixMilli(lastSeenMs),
+			RunCount: count,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during cohort version iteration: %w", err)
+	}
+
+	return records, nil
+}
+
 // --------------------------------------------------------------- PRIVATE HELPERS
 
 func mapEntityToScenario(scenario *testResultEntity, guards []*guardResultEntity) *ScenarioRunResult {
