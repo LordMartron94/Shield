@@ -170,27 +170,25 @@ SHIELD_Testing_ScenarioRunResult captures telemetry for one Scenario invocation.
 type SHIELD_Testing_ScenarioRunResult = internal.ScenarioRunResult
 
 /*
-SHIELD_Testing_Scenario groups guards protecting a single executor under Scenario metadata (name + zone path).
+SHIELD_Testing_Scenario groups guards protecting a single executor under Scenario metadata (name only).
 */
 type SHIELD_Testing_Scenario[TInput, TOutput any] = internal.Scenario[TInput, TOutput]
 
 /*
-SHIELD_Testing_ScenarioCreate builds Scenarios whose optional trailing zones feed SHIELD_Testing_ZonePathCreate—execution ignores them besides snapshot metadata emission.
+SHIELD_Testing_ScenarioCreate builds Scenario definitions without geographical metadata.
 */
 func SHIELD_Testing_ScenarioCreate[TInput, TOutput any](
 	name string,
 	guards []SHIELD_Testing_Guard[TInput, TOutput],
 	executor SHIELD_Testing_Executor[TInput, TOutput],
-	zones ...string,
 ) SHIELD_Testing_Scenario[TInput, TOutput] {
-	zonePath := SHIELD_Testing_ZonePathCreate(zones...)
-	return internal.ScenarioCreate(name, guards, executor, zonePath)
+	return internal.ScenarioCreate(name, guards, executor)
 }
 
 /*
-SHIELD_Testing_ScenarioRun executes scenario with runner-owned execution context plus test-authored run config.
+SHIELD_Testing_OperationRunScenario executes a scenario inside an operation callback using the callback's execution context.
 */
-func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
+func SHIELD_Testing_OperationRunScenario[TInput, TOutput any](
 	scenario SHIELD_Testing_Scenario[TInput, TOutput],
 	execCtx SHIELD_Testing_ExecutionContext,
 	runConfig SHIELD_Testing_ScenarioRunConfig,
@@ -210,43 +208,6 @@ func SHIELD_Testing_ScenarioRunConfigFromSnapshot(
 	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
 ) SHIELD_Testing_ScenarioRunConfig {
 	return internal.ScenarioRunConfigFromSnapshot(snapshot, entropyProviderFactory)
-}
-
-/*
-SHIELD_Testing_ScenarioRunReplayFromStoredAggregate replays Scenario definitions against snapshots embedded in hydrated aggregates without SQLite round trips.
-
-stored must stay non-nil; factories match ScenarioRunConfigFromSnapshot semantics. Identity is always provided by the current execution context.
-*/
-func SHIELD_Testing_ScenarioRunReplayFromStoredAggregate[TInput, TOutput any](
-	scenario SHIELD_Testing_Scenario[TInput, TOutput],
-	execCtx SHIELD_Testing_ExecutionContext,
-	stored *SHIELD_Testing_ScenarioRunResult,
-	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
-) (SHIELD_Testing_ScenarioRunResult, error) {
-	if stored == nil {
-		var zero SHIELD_Testing_ScenarioRunResult
-		return zero, fmt.Errorf("stored scenario aggregate is nil")
-	}
-	runConfig := internal.ScenarioRunConfigFromSnapshot(stored.SnapshotConfig(), entropyProviderFactory)
-	return internal.ScenarioRun(scenario, execCtx, runConfig), nil
-}
-
-/*
-SHIELD_Testing_ScenarioRunReplayFromStorageByID composes ScenarioResultFindByID with ReplayFromStoredAggregate so SQLite ids revive historical configurations automatically.
-*/
-func SHIELD_Testing_ScenarioRunReplayFromStorageByID[TInput, TOutput any](
-	engine *SHIELD_Testing_Storage_Engine,
-	persistedResultID string,
-	scenario SHIELD_Testing_Scenario[TInput, TOutput],
-	execCtx SHIELD_Testing_ExecutionContext,
-	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
-) (SHIELD_Testing_ScenarioRunResult, error) {
-	row, err := SHIELD_Testing_Storage_ScenarioResultFindByID(engine, persistedResultID)
-	if err != nil {
-		var zero SHIELD_Testing_ScenarioRunResult
-		return zero, err
-	}
-	return SHIELD_Testing_ScenarioRunReplayFromStoredAggregate(scenario, execCtx, row, entropyProviderFactory)
 }
 
 /*
@@ -302,4 +263,50 @@ func SHIELD_Testing_OperationRun[TState any](
 	execCtx SHIELD_Testing_ExecutionContext,
 ) SHIELD_Testing_OperationRunResult {
 	return internal.OperationRun(operation, execCtx)
+}
+
+/*
+SHIELD_Testing_OperationRunReplayFromStoredAggregate replays a scenario through an operation-scoped execution path.
+*/
+func SHIELD_Testing_OperationRunReplayFromStoredAggregate[TInput, TOutput any](
+	scenario SHIELD_Testing_Scenario[TInput, TOutput],
+	execCtx SHIELD_Testing_ExecutionContext,
+	stored *SHIELD_Testing_ScenarioRunResult,
+	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
+) (SHIELD_Testing_OperationRunResult, error) {
+	if stored == nil {
+		var zero SHIELD_Testing_OperationRunResult
+		return zero, fmt.Errorf("stored scenario aggregate is nil")
+	}
+
+	runConfig := internal.ScenarioRunConfigFromSnapshot(stored.SnapshotConfig(), entropyProviderFactory)
+
+	op := SHIELD_Testing_OperationCreateStateless(
+		"replay_operation",
+		func(_ struct{}, opCtx SHIELD_Testing_ExecutionContext) []SHIELD_Testing_ScenarioRunResult {
+			return []SHIELD_Testing_ScenarioRunResult{
+				internal.ScenarioRun(scenario, opCtx, runConfig),
+			}
+		},
+	)
+
+	return internal.OperationRun(&op, execCtx), nil
+}
+
+/*
+SHIELD_Testing_OperationRunReplayFromStorageByID composes ScenarioResultFindByID with OperationRunReplayFromStoredAggregate.
+*/
+func SHIELD_Testing_OperationRunReplayFromStorageByID[TInput, TOutput any](
+	engine *SHIELD_Testing_Storage_Engine,
+	persistedResultID string,
+	scenario SHIELD_Testing_Scenario[TInput, TOutput],
+	execCtx SHIELD_Testing_ExecutionContext,
+	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
+) (SHIELD_Testing_OperationRunResult, error) {
+	row, err := SHIELD_Testing_Storage_ScenarioResultFindByID(engine, persistedResultID)
+	if err != nil {
+		var zero SHIELD_Testing_OperationRunResult
+		return zero, err
+	}
+	return SHIELD_Testing_OperationRunReplayFromStoredAggregate(scenario, execCtx, row, entropyProviderFactory)
 }

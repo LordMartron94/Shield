@@ -335,14 +335,13 @@ type SystemIdentity struct {
 
 type ExecutionContext struct {
 	Identity SystemIdentity
+	ZonePath ZonePath
 }
 
 type Executor[TInput, TOutput any] func(input TInput) (output TOutput, error error)
 
 type Scenario[TInput, TOutput any] struct {
 	name string
-
-	zonePath ZonePath
 
 	guards []Guard[TInput, TOutput]
 
@@ -353,12 +352,10 @@ func ScenarioCreate[TInput, TOutput any](
 	name string,
 	guards []Guard[TInput, TOutput],
 	executor Executor[TInput, TOutput],
-	zonePath ZonePath,
 ) Scenario[TInput, TOutput] {
 	return Scenario[TInput, TOutput]{
 		name:     name,
 		guards:   guards,
-		zonePath: zonePath,
 		executor: executor,
 	}
 }
@@ -525,6 +522,9 @@ func ScenarioRun[TInput, TOutput any](
 	if execCtx.Identity.Version == "" || execCtx.Identity.Environment == "" {
 		panic("engine error: execution context identity must be set")
 	}
+	if len(execCtx.ZonePath.parts) == 0 {
+		panic("engine error: standalone scenario execution is unsupported (missing execution context zone path)")
+	}
 
 	seed, _ := essence.UUIDv7GenerateRandom()
 	if config.SeedOverride != nil {
@@ -560,7 +560,7 @@ func ScenarioRun[TInput, TOutput any](
 			ProviderID:     entropyProviderID,
 			Identity:       execCtx.Identity,
 		},
-		zonePath: scenario.zonePath,
+		zonePath: execCtx.ZonePath,
 	}
 
 	start := time.Now()
@@ -766,6 +766,11 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 	var scenariosPanicked bool
 	var scenariosPanicMsg string
 
+	enrichedCtx := ExecutionContext{
+		Identity: execCtx.Identity,
+		ZonePath: operation.zonePath,
+	}
+
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -773,7 +778,7 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 				scenariosPanicMsg = fmt.Sprintf("%v", r)
 			}
 		}()
-		scenarioResults = operation.runScenarios(state, execCtx)
+		scenarioResults = operation.runScenarios(state, enrichedCtx)
 	}()
 
 	if scenariosPanicked {

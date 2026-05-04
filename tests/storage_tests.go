@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestShieldStoragePublicAPI(t *testing.T) {
@@ -21,9 +22,9 @@ func TestShieldStoragePublicAPI(t *testing.T) {
 		},
 	}
 
-	runResult := shield.SHIELD_Testing_ScenarioRun(scenario, execCtx, shield.SHIELD_Testing_ScenarioRunConfig{
+	runResult := runSingleScenario(t, "storage_public_api_operation", scenario, execCtx, shield.SHIELD_Testing_ScenarioRunConfig{
 		MaxIterations: 1,
-	})
+	}, "SHIELD", "Simple", "Sum")
 
 	dbPath := filepath.Join(t.TempDir(), "shield_storage_test.sqlite")
 	storage := shield.SHIELD_Testing_Storage_EngineCreate(dbPath)
@@ -92,6 +93,7 @@ func TestShieldStorageOperationVersionLookups(t *testing.T) {
 	scenarioZonePath := "ops.alpha.case"
 
 	persistStorageScenarioVersion(t, storage, env, "git-v1", scenarioZonePath)
+	time.Sleep(2 * time.Millisecond)
 	persistStorageScenarioVersion(t, storage, env, "git-v2", scenarioZonePath)
 
 	latest, found, latestErr := shield.SHIELD_Testing_Storage_GetLatestOperationVersion(storage, operationScope, env)
@@ -145,7 +147,6 @@ func persistStorageScenarioVersion(
 			),
 		},
 		func(input int) (int, error) { return input, nil },
-		strings.Split(scenarioZonePath, ".")...,
 	)
 
 	execCtx := shield.SHIELD_Testing_ExecutionContext{
@@ -154,9 +155,16 @@ func persistStorageScenarioVersion(
 			Environment: environment,
 		},
 	}
-	result := shield.SHIELD_Testing_ScenarioRun(scenario, execCtx, shield.SHIELD_Testing_ScenarioRunConfig{
-		MaxIterations: 1,
-	})
+	result := runSingleScenario(
+		t,
+		"storage_scope_operation",
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{
+			MaxIterations: 1,
+		},
+		strings.Split(scenarioZonePath, ".")...,
+	)
 
 	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, result); err != nil {
 		t.Fatalf("expected scenario result add to succeed, got error: %v", err)

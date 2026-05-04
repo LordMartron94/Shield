@@ -16,9 +16,9 @@ func TestShield(t *testing.T) {
 			Environment: "local",
 		},
 	}
-	result := shield.SHIELD_Testing_ScenarioRun(scenario, execCtx, shield.SHIELD_Testing_ScenarioRunConfig{
+	result := runSingleScenario(t, "test_shield_operation", scenario, execCtx, shield.SHIELD_Testing_ScenarioRunConfig{
 		MaxIterations: 1,
-	})
+	}, "SHIELD", "Simple", "Sum")
 	overhead := extractResultOverhead(result)
 
 	if !result.Passed() {
@@ -50,7 +50,7 @@ func init() {
 		"sum_test_operation",
 		func(_ struct{}, execCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
 			return []shield.SHIELD_Testing_ScenarioRunResult{
-				shield.SHIELD_Testing_ScenarioRun(scenario, execCtx, runCfg),
+				runScenarioWithContext(scenario, execCtx, runCfg),
 			}
 		},
 		[]string{"SHIELD", "Internal", "Sum"}...,
@@ -85,8 +85,44 @@ func buildSumScenario() shield.SHIELD_Testing_Scenario[[]int, int] {
 
 			return counter, nil
 		},
-		[]string{"SHIELD", "Simple", "Sum"}...,
 	)
+}
+
+func runScenarioWithContext[TInput, TOutput any](
+	scenario shield.SHIELD_Testing_Scenario[TInput, TOutput],
+	execCtx shield.SHIELD_Testing_ExecutionContext,
+	runCfg shield.SHIELD_Testing_ScenarioRunConfig,
+) shield.SHIELD_Testing_ScenarioRunResult {
+	return shield.SHIELD_Testing_OperationRunScenario(scenario, execCtx, runCfg)
+}
+
+func runSingleScenario[TInput, TOutput any](
+	t *testing.T,
+	opName string,
+	scenario shield.SHIELD_Testing_Scenario[TInput, TOutput],
+	execCtx shield.SHIELD_Testing_ExecutionContext,
+	runCfg shield.SHIELD_Testing_ScenarioRunConfig,
+	opZones ...string,
+) shield.SHIELD_Testing_ScenarioRunResult {
+	t.Helper()
+
+	operation := shield.SHIELD_Testing_OperationCreateStateless(
+		opName,
+		func(_ struct{}, opCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
+			return []shield.SHIELD_Testing_ScenarioRunResult{
+				runScenarioWithContext(scenario, opCtx, runCfg),
+			}
+		},
+		opZones...,
+	)
+
+	opResult := shield.SHIELD_Testing_OperationRun(&operation, execCtx)
+	scenarioResults := opResult.ScenarioResults()
+	if len(scenarioResults) == 0 {
+		t.Fatalf("expected operation to return one scenario result, got 0")
+	}
+
+	return scenarioResults[0]
 }
 
 func extractResultOverhead(result shield.SHIELD_Testing_ScenarioRunResult) foundation.Overhead {

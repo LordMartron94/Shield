@@ -19,12 +19,12 @@ func TestShieldRendering(t *testing.T) {
 	}
 
 	scenarios := []shield.SHIELD_Testing_ScenarioRunResult{
-		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Sum_Positive", "Math", "Addition"), execCtx, runConfig),
-		shield.SHIELD_Testing_ScenarioRun(buildFailScenario("Sum_Negative", "Math", "Addition"), execCtx, runConfig),
-		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Divide_Floats", "Math", "Division"), execCtx, runConfig),
-		shield.SHIELD_Testing_ScenarioRun(buildFailScenario("Connect_Postgres", "Infrastructure", "Database"), execCtx, runConfig),
-		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Ping_Redis", "Infrastructure", "Database"), execCtx, runConfig),
-		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Parse_Config", "Core", "Config"), execCtx, runConfig),
+		runSingleScenario(t, "render_sum_positive", buildPassScenario("Sum_Positive"), execCtx, runConfig, "Math", "Addition"),
+		runSingleScenario(t, "render_sum_negative", buildFailScenario("Sum_Negative"), execCtx, runConfig, "Math", "Addition"),
+		runSingleScenario(t, "render_divide", buildPassScenario("Divide_Floats"), execCtx, runConfig, "Math", "Division"),
+		runSingleScenario(t, "render_pg", buildFailScenario("Connect_Postgres"), execCtx, runConfig, "Infrastructure", "Database"),
+		runSingleScenario(t, "render_redis", buildPassScenario("Ping_Redis"), execCtx, runConfig, "Infrastructure", "Database"),
+		runSingleScenario(t, "render_cfg", buildPassScenario("Parse_Config"), execCtx, runConfig, "Core", "Config"),
 	}
 
 	modes := []struct {
@@ -74,8 +74,8 @@ func TestShieldRegressionRendering(t *testing.T) {
 	}
 
 	// Generate physical runs strictly to satisfy the "Sources" temporal rendering
-	dummyBase := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), execCtxBase, runConfigBase)
-	dummyTarget := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), execCtxTarget, runConfigTarget)
+	dummyBase := runSingleScenario(t, "render_dummy_base", buildPassScenario("Dummy"), execCtxBase, runConfigBase, "Render", "Dummy")
+	dummyTarget := runSingleScenario(t, "render_dummy_target", buildPassScenario("Dummy"), execCtxTarget, runConfigTarget, "Render", "Dummy")
 
 	// -------------------------------------------------------------------------
 	// 1. Synthesize Identical Regression Data (Public API)
@@ -181,7 +181,7 @@ func TestShieldRegressionRendering(t *testing.T) {
 
 // --------------------------------------------------------------- DUMMY BUILDERS
 
-func buildPassScenario(name string, zones ...string) shield.SHIELD_Testing_Scenario[int, int] {
+func buildPassScenario(name string) shield.SHIELD_Testing_Scenario[int, int] {
 	guard := shield.SHIELD_Testing_GuardCreate(
 		"returns_input",
 		1,
@@ -198,11 +198,10 @@ func buildPassScenario(name string, zones ...string) shield.SHIELD_Testing_Scena
 		func(input int) (int, error) {
 			return input, nil
 		},
-		zones...,
 	)
 }
 
-func buildFailScenario(name string, zones ...string) shield.SHIELD_Testing_Scenario[int, int] {
+func buildFailScenario(name string) shield.SHIELD_Testing_Scenario[int, int] {
 	guard := shield.SHIELD_Testing_GuardCreate(
 		"expected_to_fail",
 		1,
@@ -219,6 +218,5 @@ func buildFailScenario(name string, zones ...string) shield.SHIELD_Testing_Scena
 		func(input int) (int, error) {
 			return input, nil
 		},
-		zones...,
 	)
 }

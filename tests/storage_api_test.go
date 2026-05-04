@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStorageOperationVersionLookups(t *testing.T) {
@@ -18,6 +19,7 @@ func TestStorageOperationVersionLookups(t *testing.T) {
 	scenarioZonePath := "ops.alpha.case"
 
 	persistStorageScenarioVersionForTest(t, storage, env, "git-v1", scenarioZonePath)
+	time.Sleep(2 * time.Millisecond)
 	persistStorageScenarioVersionForTest(t, storage, env, "git-v2", scenarioZonePath)
 
 	latest, found, latestErr := shield.SHIELD_Testing_Storage_GetLatestOperationVersion(storage, operationScope, env)
@@ -71,7 +73,6 @@ func persistStorageScenarioVersionForTest(
 			),
 		},
 		func(input int) (int, error) { return input, nil },
-		strings.Split(scenarioZonePath, ".")...,
 	)
 
 	execCtx := shield.SHIELD_Testing_ExecutionContext{
@@ -80,9 +81,14 @@ func persistStorageScenarioVersionForTest(
 			Environment: environment,
 		},
 	}
-	result := shield.SHIELD_Testing_ScenarioRun(scenario, execCtx, shield.SHIELD_Testing_ScenarioRunConfig{
-		MaxIterations: 1,
-	})
+	result := runSingleScenario(
+		t,
+		"storage_scope_api_operation",
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+		strings.Split(scenarioZonePath, ".")...,
+	)
 
 	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, result); err != nil {
 		t.Fatalf("expected scenario result add to succeed, got error: %v", err)

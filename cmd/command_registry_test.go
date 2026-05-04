@@ -159,7 +159,6 @@ func persistOperationScenario(t *testing.T, storage *shield.SHIELD_Testing_Stora
 		"persisted-op-scenario",
 		[]shield.SHIELD_Testing_Guard[int, int]{guard},
 		func(input int) (int, error) { return input, nil },
-		strings.Split(scenarioZonePath, ".")...,
 	)
 
 	execCtx := shield.SHIELD_Testing_ExecutionContext{
@@ -168,9 +167,14 @@ func persistOperationScenario(t *testing.T, storage *shield.SHIELD_Testing_Stora
 			Environment: environment,
 		},
 	}
-	result := shield.SHIELD_Testing_ScenarioRun(scenario, execCtx, shield.SHIELD_Testing_ScenarioRunConfig{
-		MaxIterations: 1,
-	})
+	result := runScenarioThroughOperation(
+		t,
+		"persist_operation_scenario",
+		scenario,
+		execCtx,
+		shield.SHIELD_Testing_ScenarioRunConfig{MaxIterations: 1},
+		strings.Split(scenarioZonePath, ".")...,
+	)
 
 	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, result); err != nil {
 		t.Fatalf("failed to persist scenario result: %v", err)
@@ -187,4 +191,33 @@ func runCmd(t *testing.T, dir string, name string, args ...string) string {
 		t.Fatalf("command failed: %s %v: %v (%s)", name, args, err, string(out))
 	}
 	return string(out)
+}
+
+func runScenarioThroughOperation[TInput, TOutput any](
+	t *testing.T,
+	opName string,
+	scenario shield.SHIELD_Testing_Scenario[TInput, TOutput],
+	execCtx shield.SHIELD_Testing_ExecutionContext,
+	runCfg shield.SHIELD_Testing_ScenarioRunConfig,
+	opZones ...string,
+) shield.SHIELD_Testing_ScenarioRunResult {
+	t.Helper()
+
+	operation := shield.SHIELD_Testing_OperationCreateStateless(
+		opName,
+		func(_ struct{}, opCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
+			return []shield.SHIELD_Testing_ScenarioRunResult{
+				shield.SHIELD_Testing_OperationRunScenario(scenario, opCtx, runCfg),
+			}
+		},
+		opZones...,
+	)
+
+	opResult := shield.SHIELD_Testing_OperationRun(&operation, execCtx)
+	results := opResult.ScenarioResults()
+	if len(results) == 0 {
+		t.Fatalf("expected operation to produce scenario result")
+	}
+
+	return results[0]
 }
