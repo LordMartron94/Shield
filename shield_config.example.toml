@@ -17,4 +17,4 @@ color_mode 	= "color-true" # none | ansi16 | color-true
 # Note: any test using a zone that is not mapped here will be ran every time, because SHIELD cannot prove it does not need rerunning.
 # You can use the special syntax "<always>" as well to always run a test.
 
-"Network.Auth" = "libs/network/authorization"
+"SHIELD" = "tools/shield"
