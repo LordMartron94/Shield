@@ -89,5 +89,5 @@ func main() {
 	defer shield.SHIELD_Testing_Storage_EngineClose(storage)
 
 	renderer := internal.RendererCreate(internal.RenderingConfigurationCreate(modeEnum))
-	RunLoop(renderer)
+	RunLoop(&cfg, storage, renderer)
 }

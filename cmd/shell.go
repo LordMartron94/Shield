@@ -4,29 +4,43 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"shield"
 	"shield/internal"
 	"strings"
 )
 
-func RunLoop(renderer *internal.Renderer) {
+type ShellContext struct {
+	Renderer *internal.Renderer
+	Builder  *strings.Builder
+	Scanner  *bufio.Scanner
+	Storage  *shield.SHIELD_Testing_Storage_Engine
+	Config   *ShieldConfiguration
+}
+
+func RunLoop(cfg *ShieldConfiguration, storage *shield.SHIELD_Testing_Storage_Engine, renderer *internal.Renderer) {
 	fmt.Println("Welcome to the SHIELD shell!")
 	fmt.Println("Type 'help' to see available commands.")
 
-	builder := &strings.Builder{}
-	scanner := bufio.NewScanner(os.Stdin)
+	ctx := &ShellContext{
+		Renderer: renderer,
+		Builder:  &strings.Builder{},
+		Scanner:  bufio.NewScanner(os.Stdin),
+		Storage:  storage,
+		Config:   cfg,
+	}
 
 	for {
-		renderer.WriteColor(builder, internal.ColorHighlight)
-		builder.WriteString(">>> ")
-		renderer.WriteColor(builder, internal.ColorReset)
-		fmt.Print(builder.String())
-		builder.Reset()
+		renderer.WriteColor(ctx.Builder, internal.ColorHighlight)
+		ctx.Builder.WriteString(">>> ")
+		renderer.WriteColor(ctx.Builder, internal.ColorReset)
+		fmt.Print(ctx.Builder.String())
+		ctx.Builder.Reset()
 
-		if !scanner.Scan() {
+		if !ctx.Scanner.Scan() {
 			break
 		}
 
-		input := strings.TrimSpace(scanner.Text())
+		input := strings.TrimSpace(ctx.Scanner.Text())
 		if input == "" {
 			continue
 		}
@@ -36,16 +50,16 @@ func RunLoop(renderer *internal.Renderer) {
 		args := parts[1:]
 
 		if cmd, exist := CommandMap[requestedCommand]; !exist {
-			renderer.WriteColor(builder, internal.ColorFail)
-			builder.WriteString(fmt.Sprintf("Requested Command '%s' does not exist.\n", requestedCommand))
-			renderer.WriteColor(builder, internal.ColorReset)
-			fmt.Print(builder.String())
-			builder.Reset()
+			renderer.WriteColor(ctx.Builder, internal.ColorFail)
+			ctx.Builder.WriteString(fmt.Sprintf("Requested Command '%s' does not exist.\n", requestedCommand))
+			renderer.WriteColor(ctx.Builder, internal.ColorReset)
+			fmt.Print(ctx.Builder.String())
+			ctx.Builder.Reset()
 		} else {
-			shouldExit := cmd.Runner(renderer, builder, args)
+			shouldExit := cmd.Runner(ctx, args)
 
-			fmt.Print(builder.String())
-			builder.Reset()
+			fmt.Print(ctx.Builder.String())
+			ctx.Builder.Reset()
 
 			if shouldExit {
 				return
