@@ -477,6 +477,99 @@ func TestResultDatabaseGetCohortVersions(
 	return records, nil
 }
 
+/*
+TestResultDatabaseGetLatestOperationVersion returns the most recently persisted Version for the given operation zone path + environment scope.
+*/
+func TestResultDatabaseGetLatestOperationVersion(
+	db *TestResultDatabase,
+	operationZonePath string,
+	environment string,
+) (string, bool, error) {
+	if err := testResultDatabaseEnsureOpen(db); err != nil {
+		return "", false, err
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM %s
+		WHERE %s = ?
+		  AND (%s = ? OR %s LIKE ?)
+		ORDER BY %s DESC
+		LIMIT 1`,
+		colVersion,
+		testResultsTableName,
+		colEnvironment,
+		colScenarioZonePath, colScenarioZonePath,
+		colTimestamp,
+	)
+
+	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query, environment, operationZonePath, operationZonePath+".%")
+	if err != nil {
+		return "", false, fmt.Errorf("failed to query latest operation version: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return "", false, nil
+	}
+
+	var version string
+	if err := rows.Scan(&version); err != nil {
+		return "", false, fmt.Errorf("failed to scan latest operation version: %w", err)
+	}
+
+	if err := rows.Err(); err != nil {
+		return "", false, fmt.Errorf("error during latest operation version iteration: %w", err)
+	}
+
+	return version, true, nil
+}
+
+/*
+TestResultDatabaseOperationVersionExists reports whether any persisted scenario exists for operation zone path + environment + version.
+*/
+func TestResultDatabaseOperationVersionExists(
+	db *TestResultDatabase,
+	operationZonePath string,
+	environment string,
+	version string,
+) (bool, error) {
+	if err := testResultDatabaseEnsureOpen(db); err != nil {
+		return false, err
+	}
+
+	query := fmt.Sprintf(`
+		SELECT COUNT(1)
+		FROM %s
+		WHERE %s = ?
+		  AND %s = ?
+		  AND (%s = ? OR %s LIKE ?)`,
+		testResultsTableName,
+		colEnvironment,
+		colVersion,
+		colScenarioZonePath, colScenarioZonePath,
+	)
+
+	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query, environment, version, operationZonePath, operationZonePath+".%")
+	if err != nil {
+		return false, fmt.Errorf("failed to query operation version existence: %w", err)
+	}
+	defer rows.Close()
+
+	var count int
+	if rows.Next() {
+		if err := rows.Scan(&count); err != nil {
+			return false, fmt.Errorf("failed to scan operation version count: %w", err)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("error during operation version existence iteration: %w", err)
+	}
+
+	return count > 0, nil
+}
+
 // --------------------------------------------------------------- PRIVATE HELPERS
 
 func mapEntityToScenario(scenario *testResultEntity, guards []*guardResultEntity) *ScenarioRunResult {

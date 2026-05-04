@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"cmp"
 	"fmt"
 	"foundation/extensions"
-	"os/exec"
 	"path/filepath"
 	"shield"
 	"shield/extension"
@@ -269,99 +267,91 @@ func resolveRunTargets(ctx *ShellContext, args []string) []internal.RegisteredOp
 }
 
 func resolveImpactedTargets(ctx *ShellContext, allOps []internal.RegisteredOperation) []internal.RegisteredOperation {
-	changedPaths, err := getChangedPaths(ctx)
-	if err != nil {
-		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorFail)
-		ctx.Builder.WriteString(fmt.Sprintf("Git Impact Analysis failed: %v\n", err))
-		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
-		return nil
-	}
-
 	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
 	ctx.Builder.WriteString("\n=== IMPACT DIAGNOSTICS ===\n")
-	ctx.Builder.WriteString(fmt.Sprintf("Git Root Anchor : '%s'\n", ctx.GitRoot))
-	ctx.Builder.WriteString(fmt.Sprintf("Git Diff Found %d Paths:\n", len(changedPaths)))
-	for _, p := range changedPaths {
-		ctx.Builder.WriteString(fmt.Sprintf("  - %s\n", p))
-	}
-	ctx.Builder.WriteString("==========================\n\n")
+	ctx.Builder.WriteString("Evaluating operation commit lineage from persisted scenario rows.\n")
+	ctx.Builder.WriteString("==========================\n")
 	fmt.Print(ctx.Builder.String())
 	ctx.Builder.Reset()
-	// -----------------------------------------------------------------
 
 	var targets []internal.RegisteredOperation
 
 	for _, op := range allOps {
 		physicalDir := resolvePhysicalDirectory(ctx, op.ZonePath())
 
-		if physicalDir == "<unmapped>" || physicalDir == "<always>" {
+		if physicalDir == "<always>" {
 			targets = append(targets, op)
+			writeImpactedDecision(ctx, op, "RUN", "<always>", "always-on operation")
 			continue
 		}
 
-		absPhysical := filepath.ToSlash(filepath.Join(ctx.GitRoot, physicalDir))
-
-		for _, absChanged := range changedPaths {
-			if absChanged == absPhysical || strings.HasPrefix(absChanged, absPhysical+"/") {
-				targets = append(targets, op)
-				break
-			}
+		if physicalDir == "<unmapped>" {
+			targets = append(targets, op)
+			writeImpactedDecision(ctx, op, "RUN", "<unmapped>", "unmapped zone, cannot infer commit from git location")
+			continue
 		}
+
+		absPhysicalDir := filepath.ToSlash(filepath.Join(ctx.GitRoot, physicalDir))
+		identity, isDirty := resolveOperationIdentity(ctx, absPhysicalDir)
+		opScope := op.ZonePath().Render(".")
+
+		if isDirty {
+			targets = append(targets, op)
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, "dirty worktree (ephemeral run)")
+			continue
+		}
+
+		latestVersion, latestExists, latestErr := shield.SHIELD_Testing_Storage_GetLatestOperationVersion(
+			ctx.Storage,
+			opScope,
+			ctx.Config.Environment.Name,
+		)
+		if latestErr != nil {
+			targets = append(targets, op)
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, fmt.Sprintf("storage lookup failed: %v", latestErr))
+			continue
+		}
+
+		if !latestExists {
+			targets = append(targets, op)
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, "no persisted history for operation scope")
+			continue
+		}
+
+		if latestVersion == identity.Version {
+			writeImpactedDecision(ctx, op, "SKIP", identity.Version, "latest persisted commit matches current commit")
+			continue
+		}
+
+		exists, existsErr := shield.SHIELD_Testing_Storage_OperationVersionExists(
+			ctx.Storage,
+			opScope,
+			ctx.Config.Environment.Name,
+			identity.Version,
+		)
+		if existsErr != nil {
+			targets = append(targets, op)
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, fmt.Sprintf("version existence check failed: %v", existsErr))
+			continue
+		}
+
+		if exists {
+			writeImpactedDecision(ctx, op, "SKIP", identity.Version, "commit already persisted for operation scope")
+			continue
+		}
+
+		targets = append(targets, op)
+		writeImpactedDecision(ctx, op, "RUN", identity.Version, "new commit not persisted for operation scope")
 	}
 
+	ctx.Builder.WriteString("\n")
 	return targets
 }
 
-func getChangedPaths(ctx *ShellContext) ([]string, error) {
-	pathSet := make(map[string]bool)
-
-	statusCmd := exec.Command("git", "status", "--porcelain", "-uall")
-	statusCmd.Dir = ctx.GitRoot
-	var statusOut bytes.Buffer
-	statusCmd.Stdout = &statusOut
-	if err := statusCmd.Run(); err != nil {
-		return nil, fmt.Errorf("git status failed: %w", err)
-	}
-	parseGitPaths(statusOut.String(), pathSet, true)
-
-	diffCmd := exec.Command("git", "diff", "--name-only", "@{upstream}...HEAD")
-	diffCmd.Dir = ctx.GitRoot
-	var diffOut bytes.Buffer
-	diffCmd.Stdout = &diffOut
-	if err := diffCmd.Run(); err == nil {
-		parseGitPaths(diffOut.String(), pathSet, false)
-	}
-
-	var paths []string
-	for p := range pathSet {
-		absPath := filepath.ToSlash(filepath.Join(ctx.GitRoot, p))
-		paths = append(paths, absPath)
-	}
-	return paths, nil
-}
-
-func parseGitPaths(output string, pathSet map[string]bool, isPorcelain bool) {
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-
-	for _, line := range lines {
-		if len(line) == 0 {
-			continue
-		}
-
-		var targetPath string
-		if isPorcelain {
-			if len(line) < 4 {
-				continue
-			}
-			parts := strings.Split(line[3:], " -> ")
-			targetPath = strings.Trim(parts[len(parts)-1], `"`)
-		} else {
-			targetPath = strings.Trim(line, `"`)
-		}
-
-		cleanPath := filepath.Clean(targetPath)
-		pathSet[cleanPath] = true
-	}
+func writeImpactedDecision(ctx *ShellContext, op internal.RegisteredOperation, action string, version string, reason string) {
+	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
+	ctx.Builder.WriteString(fmt.Sprintf("  [%s] %s | zone=%s | version=%s | %s\n", action, op.Name(), op.ZonePath().Render("."), version, reason))
+	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
 }
 
 func promptInteractiveTargetSelection(ctx *ShellContext, allOps []internal.RegisteredOperation) []internal.RegisteredOperation {

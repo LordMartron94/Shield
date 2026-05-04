@@ -99,3 +99,30 @@ func SHIELD_Testing_Storage_GetCohortVersions(
 ) ([]SHIELD_Testing_Storage_CohortVersionRecord, error) {
 	return internal.TestResultDatabaseGetCohortVersions(engine, scenarioName, environment, limit)
 }
+
+/*
+SHIELD_Testing_Storage_GetLatestOperationVersion returns the newest persisted identity Version for an operation scope.
+
+The scope matches rows where persisted zone_path equals operationZonePath or starts with operationZonePath plus a dot separator.
+*/
+func SHIELD_Testing_Storage_GetLatestOperationVersion(
+	engine *SHIELD_Testing_Storage_Engine,
+	operationZonePath string,
+	environment string,
+) (string, bool, error) {
+	return internal.TestResultDatabaseGetLatestOperationVersion(engine, operationZonePath, environment)
+}
+
+/*
+SHIELD_Testing_Storage_OperationVersionExists reports whether operation scope already has persisted rows for environment + version.
+
+The scope matches rows where persisted zone_path equals operationZonePath or starts with operationZonePath plus a dot separator.
+*/
+func SHIELD_Testing_Storage_OperationVersionExists(
+	engine *SHIELD_Testing_Storage_Engine,
+	operationZonePath string,
+	environment string,
+	version string,
+) (bool, error) {
+	return internal.TestResultDatabaseOperationVersionExists(engine, operationZonePath, environment, version)
+}
