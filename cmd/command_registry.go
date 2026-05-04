@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"cmp"
 	"fmt"
 	"foundation/extensions"
+	"os/exec"
+	"path/filepath"
 	"shield"
 	"shield/extension"
 	"shield/internal"
@@ -70,7 +73,7 @@ func init() {
 		{
 			Order:       3,
 			Names:       []string{"run", "r"},
-			Description: "Executes operations. Usage: run [zone_prefix] (or run with no args for interactive)",
+			Description: "Executes operations. Usage: run [zone_prefix | 'impacted'] (or no args for interactive)",
 			Runner:      runExecuteCommand,
 		},
 	}
@@ -130,7 +133,14 @@ func runExecuteCommand(ctx *ShellContext, args []string) bool {
 	for _, op := range targets {
 		physicalDir := resolvePhysicalDirectory(ctx, op.ZonePath())
 
-		identity, isDirty := resolveOperationIdentity(ctx, physicalDir)
+		var absPhysicalDir string
+		if physicalDir == "<unmapped>" || physicalDir == "<always>" {
+			absPhysicalDir = physicalDir
+		} else {
+			absPhysicalDir = filepath.ToSlash(filepath.Join(ctx.GitRoot, physicalDir))
+		}
+
+		identity, isDirty := resolveOperationIdentity(ctx, absPhysicalDir)
 
 		runCfg := internal.ScenarioRunConfig{
 			Identity: identity,
@@ -244,7 +254,10 @@ func resolveRunTargets(ctx *ShellContext, args []string) []internal.RegisteredOp
 		return nil
 	}
 
-	// Zone-Based Execution
+	if len(args) > 0 && args[0] == "impacted" {
+		return resolveImpactedTargets(ctx, allOps)
+	}
+
 	if len(args) > 0 {
 		prefix := args[0]
 		return internal.FilterRegistry(func(op internal.RegisteredOperation) bool {
@@ -252,8 +265,103 @@ func resolveRunTargets(ctx *ShellContext, args []string) []internal.RegisteredOp
 		})
 	}
 
-	// Interactive Execution
 	return promptInteractiveTargetSelection(ctx, allOps)
+}
+
+func resolveImpactedTargets(ctx *ShellContext, allOps []internal.RegisteredOperation) []internal.RegisteredOperation {
+	changedPaths, err := getChangedPaths(ctx)
+	if err != nil {
+		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorFail)
+		ctx.Builder.WriteString(fmt.Sprintf("Git Impact Analysis failed: %v\n", err))
+		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
+		return nil
+	}
+
+	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
+	ctx.Builder.WriteString("\n=== IMPACT DIAGNOSTICS ===\n")
+	ctx.Builder.WriteString(fmt.Sprintf("Git Root Anchor : '%s'\n", ctx.GitRoot))
+	ctx.Builder.WriteString(fmt.Sprintf("Git Diff Found %d Paths:\n", len(changedPaths)))
+	for _, p := range changedPaths {
+		ctx.Builder.WriteString(fmt.Sprintf("  - %s\n", p))
+	}
+	ctx.Builder.WriteString("==========================\n\n")
+	fmt.Print(ctx.Builder.String())
+	ctx.Builder.Reset()
+	// -----------------------------------------------------------------
+
+	var targets []internal.RegisteredOperation
+
+	for _, op := range allOps {
+		physicalDir := resolvePhysicalDirectory(ctx, op.ZonePath())
+
+		if physicalDir == "<unmapped>" || physicalDir == "<always>" {
+			targets = append(targets, op)
+			continue
+		}
+
+		absPhysical := filepath.ToSlash(filepath.Join(ctx.GitRoot, physicalDir))
+
+		for _, absChanged := range changedPaths {
+			if absChanged == absPhysical || strings.HasPrefix(absChanged, absPhysical+"/") {
+				targets = append(targets, op)
+				break
+			}
+		}
+	}
+
+	return targets
+}
+
+func getChangedPaths(ctx *ShellContext) ([]string, error) {
+	pathSet := make(map[string]bool)
+
+	statusCmd := exec.Command("git", "status", "--porcelain", "-uall")
+	statusCmd.Dir = ctx.GitRoot
+	var statusOut bytes.Buffer
+	statusCmd.Stdout = &statusOut
+	if err := statusCmd.Run(); err != nil {
+		return nil, fmt.Errorf("git status failed: %w", err)
+	}
+	parseGitPaths(statusOut.String(), pathSet, true)
+
+	diffCmd := exec.Command("git", "diff", "--name-only", "@{upstream}...HEAD")
+	diffCmd.Dir = ctx.GitRoot
+	var diffOut bytes.Buffer
+	diffCmd.Stdout = &diffOut
+	if err := diffCmd.Run(); err == nil {
+		parseGitPaths(diffOut.String(), pathSet, false)
+	}
+
+	var paths []string
+	for p := range pathSet {
+		absPath := filepath.ToSlash(filepath.Join(ctx.GitRoot, p))
+		paths = append(paths, absPath)
+	}
+	return paths, nil
+}
+
+func parseGitPaths(output string, pathSet map[string]bool, isPorcelain bool) {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+
+		var targetPath string
+		if isPorcelain {
+			if len(line) < 4 {
+				continue
+			}
+			parts := strings.Split(line[3:], " -> ")
+			targetPath = strings.Trim(parts[len(parts)-1], `"`)
+		} else {
+			targetPath = strings.Trim(line, `"`)
+		}
+
+		cleanPath := filepath.Clean(targetPath)
+		pathSet[cleanPath] = true
+	}
 }
 
 func promptInteractiveTargetSelection(ctx *ShellContext, allOps []internal.RegisteredOperation) []internal.RegisteredOperation {

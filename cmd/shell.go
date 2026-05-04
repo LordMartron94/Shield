@@ -2,8 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"shield"
 	"shield/internal"
 	"strings"
@@ -15,11 +18,21 @@ type ShellContext struct {
 	Scanner  *bufio.Scanner
 	Storage  *shield.SHIELD_Testing_Storage_Engine
 	Config   *ShieldConfiguration
+	GitRoot  string
 }
 
-func RunLoop(cfg *ShieldConfiguration, storage *shield.SHIELD_Testing_Storage_Engine, renderer *internal.Renderer) {
+func RunLoop(
+	cfg *ShieldConfiguration,
+	storage *shield.SHIELD_Testing_Storage_Engine,
+	renderer *internal.Renderer,
+) {
 	fmt.Println("Welcome to the SHIELD shell!")
 	fmt.Println("Type 'help' to see available commands.")
+
+	gitRoot, err := resolveGitRoot()
+	if err != nil {
+		panic(fmt.Errorf("fatal infrastructure error: shield must be run inside a git repository: %w", err))
+	}
 
 	ctx := &ShellContext{
 		Renderer: renderer,
@@ -27,6 +40,7 @@ func RunLoop(cfg *ShieldConfiguration, storage *shield.SHIELD_Testing_Storage_En
 		Scanner:  bufio.NewScanner(os.Stdin),
 		Storage:  storage,
 		Config:   cfg,
+		GitRoot:  gitRoot,
 	}
 
 	for {
@@ -66,4 +80,14 @@ func RunLoop(cfg *ShieldConfiguration, storage *shield.SHIELD_Testing_Storage_En
 			}
 		}
 	}
+}
+
+func resolveGitRoot() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to resolve git root: %w", err)
+	}
+	return filepath.ToSlash(filepath.Clean(strings.TrimSpace(out.String()))), nil
 }
