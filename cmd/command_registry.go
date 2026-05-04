@@ -74,6 +74,12 @@ func init() {
 			Description: "Executes operations. Usage: run [zone_prefix | 'impacted'] (or no args for interactive)",
 			Runner:      runExecuteCommand,
 		},
+		{
+			Order:       4,
+			Names:       []string{"results", "res"},
+			Description: "Lists persisted scenario results. Usage: results [page]",
+			Runner:      runResultsCommand,
+		},
 	}
 
 	extensions.SortedCopyShallow(CommandRegistry, func(a, b Command) int {
@@ -166,6 +172,39 @@ func runExecuteCommand(ctx *ShellContext, args []string) bool {
 	report := internal.RenderScenarios(ctx.Renderer, allResults)
 	ctx.Builder.WriteString(report)
 
+	return false
+}
+
+func runResultsCommand(ctx *ShellContext, args []string) bool {
+	totalRows, countErr := shield.SHIELD_Testing_Storage_CountScenarioResults(ctx.Storage)
+	if countErr != nil {
+		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorFail)
+		ctx.Builder.WriteString(fmt.Sprintf("Failed to count stored results: %v\n", countErr))
+		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
+		return false
+	}
+
+	if totalRows == 0 {
+		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
+		ctx.Builder.WriteString("No persisted scenario results found.\n")
+		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
+		return false
+	}
+
+	startIdx, endIdx, currentPage, totalPages := calculatePagination(totalRows, args)
+	pageSize := endIdx - startIdx
+
+	rows, listErr := shield.SHIELD_Testing_Storage_ListScenarioResultsPage(ctx.Storage, pageSize, startIdx)
+	if listErr != nil {
+		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorFail)
+		ctx.Builder.WriteString(fmt.Sprintf("Failed to read stored results: %v\n", listErr))
+		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
+		return false
+	}
+
+	renderResultsHeader(ctx.Renderer, ctx.Builder, currentPage, totalPages, startIdx, endIdx, totalRows)
+	renderResultsTable(ctx.Renderer, ctx.Builder, rows)
+	renderResultsFooter(ctx.Renderer, ctx.Builder, currentPage, totalPages)
 	return false
 }
 
@@ -501,4 +540,66 @@ func renderListFooter(renderer *internal.Renderer, b *strings.Builder, current, 
 	} else {
 		b.WriteString("\n")
 	}
+}
+
+func renderResultsHeader(renderer *internal.Renderer, b *strings.Builder, current, total, start, end, totalRows int) {
+	renderer.WriteColor(b, internal.ColorHeader)
+	b.WriteString(fmt.Sprintf("\n=== STORED RESULTS (Page %d of %d) ===\n", current, total))
+	renderer.WriteColor(b, internal.ColorMuted)
+	b.WriteString(fmt.Sprintf("Showing %d-%d of %d total rows\n\n", start+1, end, totalRows))
+	renderer.WriteColor(b, internal.ColorReset)
+}
+
+func renderResultsTable(renderer *internal.Renderer, b *strings.Builder, rows []shield.SHIELD_Testing_Storage_StoredScenarioSummary) {
+	renderer.WriteColor(b, internal.ColorHighlight)
+	b.WriteString(fmt.Sprintf("%-6s %-28s %-28s %-8s %-12s %-19s\n", "State", "Scenario", "Zone", "Env", "Version", "Timestamp"))
+	renderer.WriteColor(b, internal.ColorReset)
+
+	for _, row := range rows {
+		state := "PASS"
+		stateColor := internal.ColorPass
+		if !row.Passed {
+			state = "FAIL"
+			stateColor = internal.ColorFail
+		}
+
+		renderer.WriteColor(b, stateColor)
+		b.WriteString(fmt.Sprintf("%-6s ", state))
+		renderer.WriteColor(b, internal.ColorReset)
+
+		b.WriteString(fmt.Sprintf(
+			"%-28s %-28s %-8s %-12s %-19s\n",
+			truncateColumn(row.Name, 28),
+			truncateColumn(row.ZonePath, 28),
+			truncateColumn(row.Environment, 8),
+			truncateColumn(row.Version, 12),
+			row.Timestamp.Local().Format("2006-01-02 15:04:05"),
+		))
+	}
+
+	b.WriteString("\n")
+}
+
+func renderResultsFooter(renderer *internal.Renderer, b *strings.Builder, current, total int) {
+	if current < total {
+		renderer.WriteColor(b, internal.ColorMuted)
+		b.WriteString(fmt.Sprintf("Type 'results %d' for the next page.\n", current+1))
+		renderer.WriteColor(b, internal.ColorReset)
+	}
+}
+
+func truncateColumn(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	if len(value) <= width {
+		return value
+	}
+
+	if width <= 3 {
+		return value[:width]
+	}
+
+	return value[:width-3] + "..."
 }

@@ -14,6 +14,7 @@ runs regardless of pass/failure. Enumerate these before pinning SHIELD_Testing_S
 through SHIELD_Testing_Storage_ScenarioResultFindByIdentity.
 */
 type SHIELD_Testing_Storage_CohortVersionRecord = internal.CohortVersionRecord
+type SHIELD_Testing_Storage_StoredScenarioSummary = internal.StoredScenarioSummary
 
 /*
 SHIELD_Testing_Storage_EngineCreate creates a storage engine bound to the given SQLite database file path.
@@ -125,4 +126,24 @@ func SHIELD_Testing_Storage_OperationVersionExists(
 	version string,
 ) (bool, error) {
 	return internal.TestResultDatabaseOperationVersionExists(engine, operationZonePath, environment, version)
+}
+
+/*
+SHIELD_Testing_Storage_CountScenarioResults returns the total number of persisted scenario rows.
+*/
+func SHIELD_Testing_Storage_CountScenarioResults(
+	engine *SHIELD_Testing_Storage_Engine,
+) (int, error) {
+	return internal.TestResultDatabaseCountScenarioResults(engine)
+}
+
+/*
+SHIELD_Testing_Storage_ListScenarioResultsPage returns one page of persisted scenario summaries ordered by newest first.
+*/
+func SHIELD_Testing_Storage_ListScenarioResultsPage(
+	engine *SHIELD_Testing_Storage_Engine,
+	limit int,
+	offset int,
+) ([]SHIELD_Testing_Storage_StoredScenarioSummary, error) {
+	return internal.TestResultDatabaseListScenarioResultsPage(engine, limit, offset)
 }

@@ -418,6 +418,19 @@ type CohortVersionRecord struct {
 }
 
 /*
+StoredScenarioSummary is a lightweight projection for listing persisted scenario rows without hydrating guards.
+*/
+type StoredScenarioSummary struct {
+	ResultID    string
+	Name        string
+	ZonePath    string
+	Timestamp   time.Time
+	Passed      bool
+	Version     string
+	Environment string
+}
+
+/*
 TestResultDatabaseGetCohortVersions groups SQLite rows by Version, orders groups by descending MAX(timestamp), and caps DISTINCT results with limit (SQL semantics: limit ≤0 usually returns empty).
 */
 func TestResultDatabaseGetCohortVersions(
@@ -494,13 +507,13 @@ func TestResultDatabaseGetLatestOperationVersion(
 		FROM %s
 		WHERE %s = ?
 		  AND (%s = ? OR %s LIKE ?)
-		ORDER BY %s DESC
+		ORDER BY %s DESC, %s DESC
 		LIMIT 1`,
 		colVersion,
 		testResultsTableName,
 		colEnvironment,
 		colScenarioZonePath, colScenarioZonePath,
-		colTimestamp,
+		colTimestamp, colScenarioID,
 	)
 
 	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query, environment, operationZonePath, operationZonePath+".%")
@@ -568,6 +581,95 @@ func TestResultDatabaseOperationVersionExists(
 	}
 
 	return count > 0, nil
+}
+
+/*
+TestResultDatabaseCountScenarioResults returns how many scenario rows are currently persisted.
+*/
+func TestResultDatabaseCountScenarioResults(db *TestResultDatabase) (int, error) {
+	if err := testResultDatabaseEnsureOpen(db); err != nil {
+		return 0, err
+	}
+
+	query := fmt.Sprintf(`SELECT COUNT(1) FROM %s`, testResultsTableName)
+	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count scenario results: %w", err)
+	}
+	defer rows.Close()
+
+	var count int
+	if rows.Next() {
+		if err := rows.Scan(&count); err != nil {
+			return 0, fmt.Errorf("failed to scan scenario result count: %w", err)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("error during scenario result count iteration: %w", err)
+	}
+
+	return count, nil
+}
+
+/*
+TestResultDatabaseListScenarioResultsPage returns one timestamp-descending page of stored scenario summaries.
+*/
+func TestResultDatabaseListScenarioResultsPage(
+	db *TestResultDatabase,
+	limit int,
+	offset int,
+) ([]StoredScenarioSummary, error) {
+	if err := testResultDatabaseEnsureOpen(db); err != nil {
+		return nil, err
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s, %s, %s, %s, %s, %s, %s
+		FROM %s
+		ORDER BY %s DESC, %s DESC
+		LIMIT ? OFFSET ?`,
+		colScenarioID, colScenarioName, colScenarioZonePath, colTimestamp, colPassed, colVersion, colEnvironment,
+		testResultsTableName,
+		colTimestamp, colScenarioID,
+	)
+
+	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list scenario result page: %w", err)
+	}
+	defer rows.Close()
+
+	summaries := []StoredScenarioSummary{}
+	for rows.Next() {
+		var id string
+		var name string
+		var zonePath string
+		var timestampMS int64
+		var passedInt int
+		var version string
+		var environment string
+
+		if err := rows.Scan(&id, &name, &zonePath, &timestampMS, &passedInt, &version, &environment); err != nil {
+			return nil, fmt.Errorf("failed to scan scenario summary row: %w", err)
+		}
+
+		summaries = append(summaries, StoredScenarioSummary{
+			ResultID:    id,
+			Name:        name,
+			ZonePath:    zonePath,
+			Timestamp:   time.UnixMilli(timestampMS),
+			Passed:      passedInt == 1,
+			Version:     version,
+			Environment: environment,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error during scenario summary iteration: %w", err)
+	}
+
+	return summaries, nil
 }
 
 // --------------------------------------------------------------- PRIVATE HELPERS
