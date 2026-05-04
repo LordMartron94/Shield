@@ -65,103 +65,7 @@ func init() {
 			Order:       2,
 			Names:       []string{"list", "ls"},
 			Description: "Lists all registered operations. Usage: list [page]",
-			Runner: func(renderer *internal.Renderer, b *strings.Builder, args []string) bool {
-				// 1. Fetch all operations (Filter that always returns true)
-				allOps := internal.FilterRegistry(func(op internal.RegisteredOperation) bool {
-					return true
-				})
-
-				if len(allOps) == 0 {
-					renderer.WriteColor(b, internal.ColorMuted)
-					b.WriteString("No operations are currently registered.\n")
-					renderer.WriteColor(b, internal.ColorReset)
-					return false
-				}
-
-				// 2. Deterministic Sorting by ZonePath
-				sort.SliceStable(allOps, func(i, j int) bool {
-					pathI := allOps[i].ZonePath().Render(".")
-					pathJ := allOps[j].ZonePath().Render(".")
-					if pathI == pathJ {
-						return allOps[i].Name() < allOps[j].Name()
-					}
-					return pathI < pathJ
-				})
-
-				// 3. Pagination Math
-				const pageSize = 20
-				totalOps := len(allOps)
-				totalPages := (totalOps + pageSize - 1) / pageSize
-				currentPage := 1
-
-				if len(args) > 0 {
-					if parsed, err := strconv.Atoi(args[0]); err == nil && parsed > 0 {
-						currentPage = parsed
-					}
-				}
-
-				if currentPage > totalPages {
-					currentPage = totalPages
-				}
-
-				startIdx := (currentPage - 1) * pageSize
-				endIdx := startIdx + pageSize
-				if endIdx > totalOps {
-					endIdx = totalOps
-				}
-
-				pageOps := allOps[startIdx:endIdx]
-
-				// 4. Render Header
-				renderer.WriteColor(b, internal.ColorHeader)
-				b.WriteString(fmt.Sprintf("\n=== REGISTERED OPERATIONS (Page %d of %d) ===\n", currentPage, totalPages))
-				renderer.WriteColor(b, internal.ColorMuted)
-				b.WriteString(fmt.Sprintf("Showing %d-%d of %d total operations\n\n", startIdx+1, endIdx, totalOps))
-				renderer.WriteColor(b, internal.ColorReset)
-
-				// 5. Render Tree Illusion for this Page
-				var prevPath []string
-				for _, op := range pageOps {
-					currPath := op.ZonePath().Parts()
-
-					divergenceIndex := 0
-					for divergenceIndex < len(prevPath) &&
-						divergenceIndex < len(currPath) &&
-						prevPath[divergenceIndex] == currPath[divergenceIndex] {
-						divergenceIndex++
-					}
-
-					for i := divergenceIndex; i < len(currPath); i++ {
-						indent := strings.Repeat("  ", i)
-						b.WriteString(indent)
-						renderer.WriteColor(b, internal.ColorHighlight)
-						b.WriteString(currPath[i])
-						renderer.WriteColor(b, internal.ColorReset)
-						b.WriteString("\n")
-					}
-
-					opIndent := strings.Repeat("  ", len(currPath))
-					b.WriteString(opIndent)
-					renderer.WriteColor(b, internal.ColorPass)
-					b.WriteString("» ")
-					renderer.WriteColor(b, internal.ColorReset)
-					b.WriteString(op.Name())
-					b.WriteString("\n")
-
-					prevPath = currPath
-				}
-
-				// 6. Footer Hint
-				if currentPage < totalPages {
-					renderer.WriteColor(b, internal.ColorMuted)
-					b.WriteString(fmt.Sprintf("\nType 'list %d' for the next page.\n", currentPage+1))
-					renderer.WriteColor(b, internal.ColorReset)
-				} else {
-					b.WriteString("\n")
-				}
-
-				return false
-			},
+			Runner:      runListCommand,
 		},
 	}
 
@@ -177,5 +81,122 @@ func init() {
 			}
 			CommandMap[name] = cmd
 		}
+	}
+}
+
+// ---------------------------------------------------------------- COMMAND RUNNERS
+
+func runListCommand(renderer *internal.Renderer, b *strings.Builder, args []string) bool {
+	allOps := fetchAndSortOperations()
+
+	if len(allOps) == 0 {
+		renderer.WriteColor(b, internal.ColorMuted)
+		b.WriteString("No operations are currently registered.\n")
+		renderer.WriteColor(b, internal.ColorReset)
+		return false
+	}
+
+	startIdx, endIdx, currentPage, totalPages := calculatePagination(len(allOps), args)
+	pageOps := allOps[startIdx:endIdx]
+
+	renderListHeader(renderer, b, currentPage, totalPages, startIdx, endIdx, len(allOps))
+	renderOperationsTree(renderer, b, pageOps)
+	renderListFooter(renderer, b, currentPage, totalPages)
+
+	return false
+}
+
+// ---------------------------------------------------------------- PRIVATE HELPERS
+
+func fetchAndSortOperations() []internal.RegisteredOperation {
+	ops := internal.FilterRegistry(func(op internal.RegisteredOperation) bool {
+		return true
+	})
+
+	sort.SliceStable(ops, func(i, j int) bool {
+		pathI := ops[i].ZonePath().Render(".")
+		pathJ := ops[j].ZonePath().Render(".")
+		if pathI == pathJ {
+			return ops[i].Name() < ops[j].Name()
+		}
+		return pathI < pathJ
+	})
+
+	return ops
+}
+
+func calculatePagination(totalOps int, args []string) (startIdx, endIdx, currentPage, totalPages int) {
+	const pageSize = 20
+	totalPages = (totalOps + pageSize - 1) / pageSize
+	currentPage = 1
+
+	if len(args) > 0 {
+		if parsed, err := strconv.Atoi(args[0]); err == nil && parsed > 0 {
+			currentPage = parsed
+		}
+	}
+
+	if currentPage > totalPages {
+		currentPage = totalPages
+	}
+
+	startIdx = (currentPage - 1) * pageSize
+	endIdx = startIdx + pageSize
+	if endIdx > totalOps {
+		endIdx = totalOps
+	}
+
+	return startIdx, endIdx, currentPage, totalPages
+}
+
+func renderListHeader(renderer *internal.Renderer, b *strings.Builder, current, total, start, end, totalOps int) {
+	renderer.WriteColor(b, internal.ColorHeader)
+	b.WriteString(fmt.Sprintf("\n=== REGISTERED OPERATIONS (Page %d of %d) ===\n", current, total))
+	renderer.WriteColor(b, internal.ColorMuted)
+	b.WriteString(fmt.Sprintf("Showing %d-%d of %d total operations\n\n", start+1, end, totalOps))
+	renderer.WriteColor(b, internal.ColorReset)
+}
+
+func renderOperationsTree(renderer *internal.Renderer, b *strings.Builder, ops []internal.RegisteredOperation) {
+	var prevPath []string
+
+	for _, op := range ops {
+		currPath := op.ZonePath().Parts()
+
+		divergenceIndex := 0
+		for divergenceIndex < len(prevPath) &&
+			divergenceIndex < len(currPath) &&
+			prevPath[divergenceIndex] == currPath[divergenceIndex] {
+			divergenceIndex++
+		}
+
+		for i := divergenceIndex; i < len(currPath); i++ {
+			indent := strings.Repeat("  ", i)
+			b.WriteString(indent)
+			renderer.WriteColor(b, internal.ColorHighlight)
+			b.WriteString(currPath[i])
+			renderer.WriteColor(b, internal.ColorReset)
+			b.WriteString("\n")
+		}
+
+		opIndent := strings.Repeat("  ", len(currPath))
+		b.WriteString(opIndent)
+		renderer.WriteColor(b, internal.ColorPass)
+		b.WriteString("» ")
+		renderer.WriteColor(b, internal.ColorReset)
+		b.WriteString(op.Name())
+		b.WriteString("\n")
+
+		prevPath = currPath
+	}
+}
+
+func renderListFooter(renderer *internal.Renderer, b *strings.Builder, current, total int) {
+	if current < total {
+		renderer.WriteColor(b, internal.ColorMuted)
+		b.WriteString(fmt.Sprintf("\nType 'list %d' for the next page.\n", current+1))
+		renderer.WriteColor(b, internal.ColorReset)
+	} else {
+		b.WriteString("\n")
 	}
 }
