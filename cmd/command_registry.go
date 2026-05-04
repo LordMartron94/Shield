@@ -166,11 +166,10 @@ func runExecuteCommand(ctx *ShellContext, args []string) bool {
 func resolvePhysicalDirectory(ctx *ShellContext, zonePath internal.ZonePath) string {
 	rendered := zonePath.Render(".")
 	bestMatchLength := -1
-	bestPath := "."
+	bestPath := "<unmapped>"
 
 	for mappedZone, physicalDir := range ctx.Config.ZoneMapping {
 		mappedZoneStr := string(mappedZone)
-
 		if strings.HasPrefix(rendered, mappedZoneStr) {
 			if len(mappedZoneStr) > bestMatchLength {
 				bestMatchLength = len(mappedZoneStr)
@@ -182,6 +181,13 @@ func resolvePhysicalDirectory(ctx *ShellContext, zonePath internal.ZonePath) str
 }
 
 func resolveOperationIdentity(ctx *ShellContext, physicalDir string) (internal.SystemIdentity, bool) {
+	if physicalDir == "<unmapped>" || physicalDir == "<always>" {
+		return internal.SystemIdentity{
+			Version:     physicalDir,
+			Environment: ctx.Config.Environment.Name,
+		}, true
+	}
+
 	identity, err := extension.SystemIdentityFromGit(ctx.Config.Environment.Name, physicalDir)
 
 	if err == extension.ErrDirtyWorktree {
