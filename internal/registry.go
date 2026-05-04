@@ -11,14 +11,14 @@ import (
 type RegisteredOperation struct {
 	name     string
 	zonePath ZonePath
-	runner   func() OperationRunResult
+	runner   func(execCtx ExecutionContext) OperationRunResult
 }
 
 /*
 Run executes the registered operation.
 */
-func (o RegisteredOperation) Run(config ScenarioRunConfig) OperationRunResult {
-	return o.runner()
+func (o RegisteredOperation) Run(execCtx ExecutionContext) OperationRunResult {
+	return o.runner(execCtx)
 }
 
 /*
@@ -47,8 +47,8 @@ func OperationRegister[TState any](operation Operation[TState]) {
 	operationRegistry = append(operationRegistry, RegisteredOperation{
 		name:     operation.name,
 		zonePath: operation.zonePath,
-		runner: func() OperationRunResult {
-			return OperationRun(&operation)
+		runner: func(execCtx ExecutionContext) OperationRunResult {
+			return OperationRun(&operation, execCtx)
 		},
 	})
 

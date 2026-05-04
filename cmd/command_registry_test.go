@@ -98,7 +98,9 @@ func setupImpactedTestContext(t *testing.T, dirty bool) (*ShellContext, internal
 	opName := "impacted-op-" + strings.ReplaceAll(t.Name(), "/", "-")
 	operation := shield.SHIELD_Testing_OperationCreateStateless(
 		opName,
-		func(_ struct{}) []shield.SHIELD_Testing_ScenarioRunResult { return nil },
+		func(_ struct{}, _ shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
+			return nil
+		},
 		"ops", "alpha",
 	)
 	shield.SHIELD_Registry_OperationRegister(operation)
@@ -160,12 +162,14 @@ func persistOperationScenario(t *testing.T, storage *shield.SHIELD_Testing_Stora
 		strings.Split(scenarioZonePath, ".")...,
 	)
 
-	result := shield.SHIELD_Testing_ScenarioRun(scenario, shield.SHIELD_Testing_ScenarioRunConfig{
-		MaxIterations: 1,
+	execCtx := shield.SHIELD_Testing_ExecutionContext{
 		Identity: shield.SHIELD_Testing_SystemIdentity{
 			Version:     version,
 			Environment: environment,
 		},
+	}
+	result := shield.SHIELD_Testing_ScenarioRun(scenario, execCtx, shield.SHIELD_Testing_ScenarioRunConfig{
+		MaxIterations: 1,
 	})
 
 	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, result); err != nil {

@@ -145,12 +145,8 @@ func runExecuteCommand(ctx *ShellContext, args []string) bool {
 		}
 
 		identity, isDirty := resolveOperationIdentity(ctx, absPhysicalDir)
-
-		runCfg := internal.ScenarioRunConfig{
+		execCtx := internal.ExecutionContext{
 			Identity: identity,
-			// FuzzingPattern: internal.FuzzingPattern_Standard,
-			// MaxIterations:  1000,
-			// UseDuration:    false,
 		}
 
 		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
@@ -160,7 +156,7 @@ func runExecuteCommand(ctx *ShellContext, args []string) bool {
 		ctx.Builder.Reset()
 
 		// 4. Execute
-		opResults := op.Run(runCfg)
+		opResults := op.Run(execCtx)
 		resultsSlice := opResults.ScenarioResults()
 		allResults = append(allResults, resultsSlice...)
 

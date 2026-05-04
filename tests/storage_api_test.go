@@ -74,12 +74,14 @@ func persistStorageScenarioVersionForTest(
 		strings.Split(scenarioZonePath, ".")...,
 	)
 
-	result := shield.SHIELD_Testing_ScenarioRun(scenario, shield.SHIELD_Testing_ScenarioRunConfig{
-		MaxIterations: 1,
+	execCtx := shield.SHIELD_Testing_ExecutionContext{
 		Identity: shield.SHIELD_Testing_SystemIdentity{
 			Version:     version,
 			Environment: environment,
 		},
+	}
+	result := shield.SHIELD_Testing_ScenarioRun(scenario, execCtx, shield.SHIELD_Testing_ScenarioRunConfig{
+		MaxIterations: 1,
 	})
 
 	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, result); err != nil {

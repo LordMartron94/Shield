@@ -8,7 +8,7 @@ import (
 )
 
 /*
-This file hosts SHIELD testing facades spanning data-driven scenarios, fuzzing, SystemIdentity-bearing snapshots,
+This file hosts SHIELD testing facades spanning data-driven scenarios, fuzzing, runner-supplied execution identity snapshots,
 
 Operation lifecycles, and SQLite-backed replay bundles.
 */
@@ -19,9 +19,7 @@ SHIELD_Testing_GuardPolicy defines composable evaluation rules enforced sequenti
 type SHIELD_Testing_GuardPolicy[TOutput any] = internal.GuardPolicy[TOutput]
 
 /*
-SHIELD_Testing_ScenarioRunConfig carries ScenarioRun knobs including mandatory SHIELD_Testing_SystemIdentity—
-
-blank Environment or Version triggers an engine panic and every persisted row echoes the lineage back through SnapshotConfig.
+SHIELD_Testing_ScenarioRunConfig carries ScenarioRun knobs controlled by test authors (fuzzing, entropy, effort limits).
 */
 type SHIELD_Testing_ScenarioRunConfig = internal.ScenarioRunConfig
 
@@ -54,6 +52,7 @@ Both strings must populate ScenarioRun configs. Pairwise regressions insist on E
 storage identity queries and cohort statistics require homogeneous env+Version slices alongside SHIELD_Testing_Storage_GetCohortVersions discovery.
 */
 type SHIELD_Testing_SystemIdentity = internal.SystemIdentity
+type SHIELD_Testing_ExecutionContext = internal.ExecutionContext
 
 /*
 SHIELD_Testing_ZonePathCreate stitches ordered zone segments into a metadata path (empty parts remain valid sentinel paths).
@@ -189,19 +188,20 @@ func SHIELD_Testing_ScenarioCreate[TInput, TOutput any](
 }
 
 /*
-SHIELD_Testing_ScenarioRun executes scenario honoring runConfig including mandatory Identity; invalid Identity triggers engine panic messaging.
+SHIELD_Testing_ScenarioRun executes scenario with runner-owned execution context plus test-authored run config.
 */
 func SHIELD_Testing_ScenarioRun[TInput, TOutput any](
 	scenario SHIELD_Testing_Scenario[TInput, TOutput],
+	execCtx SHIELD_Testing_ExecutionContext,
 	runConfig SHIELD_Testing_ScenarioRunConfig,
 ) SHIELD_Testing_ScenarioRunResult {
-	return internal.ScenarioRun(scenario, runConfig)
+	return internal.ScenarioRun(scenario, execCtx, runConfig)
 }
 
 /*
 SHIELD_Testing_ScenarioRunConfigFromSnapshot rebuilds ScenarioRunConfig from Snapshot mirrors: SeedOverride copies snapshot.Seed,
 
-fuzz limits and Identity flow unchanged, entropy factories pass through (nil keeps MixSplit defaults).
+fuzz limits flow unchanged, entropy factories pass through (nil keeps MixSplit defaults).
 
 ProviderID stays diagnostic—recreate original entropy plumbing via custom factories when fidelity demands it.
 */
@@ -215,10 +215,11 @@ func SHIELD_Testing_ScenarioRunConfigFromSnapshot(
 /*
 SHIELD_Testing_ScenarioRunReplayFromStoredAggregate replays Scenario definitions against snapshots embedded in hydrated aggregates without SQLite round trips.
 
-stored must stay non-nil; factories match ScenarioRunConfigFromSnapshot semantics. Callers intentionally may diverge Scenario shape from persisted names while Identity always echoes the stored Snapshot exactly.
+stored must stay non-nil; factories match ScenarioRunConfigFromSnapshot semantics. Identity is always provided by the current execution context.
 */
 func SHIELD_Testing_ScenarioRunReplayFromStoredAggregate[TInput, TOutput any](
 	scenario SHIELD_Testing_Scenario[TInput, TOutput],
+	execCtx SHIELD_Testing_ExecutionContext,
 	stored *SHIELD_Testing_ScenarioRunResult,
 	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
 ) (SHIELD_Testing_ScenarioRunResult, error) {
@@ -227,7 +228,7 @@ func SHIELD_Testing_ScenarioRunReplayFromStoredAggregate[TInput, TOutput any](
 		return zero, fmt.Errorf("stored scenario aggregate is nil")
 	}
 	runConfig := internal.ScenarioRunConfigFromSnapshot(stored.SnapshotConfig(), entropyProviderFactory)
-	return internal.ScenarioRun(scenario, runConfig), nil
+	return internal.ScenarioRun(scenario, execCtx, runConfig), nil
 }
 
 /*
@@ -237,6 +238,7 @@ func SHIELD_Testing_ScenarioRunReplayFromStorageByID[TInput, TOutput any](
 	engine *SHIELD_Testing_Storage_Engine,
 	persistedResultID string,
 	scenario SHIELD_Testing_Scenario[TInput, TOutput],
+	execCtx SHIELD_Testing_ExecutionContext,
 	entropyProviderFactory func(seed foundation.Uint128) (provider *entropy.EntropyProvider, id string),
 ) (SHIELD_Testing_ScenarioRunResult, error) {
 	row, err := SHIELD_Testing_Storage_ScenarioResultFindByID(engine, persistedResultID)
@@ -244,7 +246,7 @@ func SHIELD_Testing_ScenarioRunReplayFromStorageByID[TInput, TOutput any](
 		var zero SHIELD_Testing_ScenarioRunResult
 		return zero, err
 	}
-	return SHIELD_Testing_ScenarioRunReplayFromStoredAggregate(scenario, row, entropyProviderFactory)
+	return SHIELD_Testing_ScenarioRunReplayFromStoredAggregate(scenario, execCtx, row, entropyProviderFactory)
 }
 
 /*
@@ -260,13 +262,13 @@ SHIELD_Testing_OperationRunResult aggregates nested Scenario summaries plus fram
 type SHIELD_Testing_OperationRunResult = internal.OperationRunResult
 
 /*
-SHIELD_Testing_OperationCreate registers lifecycle closures plus trailing zone segments like ScenarioCreate; inner ScenarioRun iterations must continuously supply compliant Identity payloads when they embed configs reused across loops.
+SHIELD_Testing_OperationCreate registers lifecycle closures plus trailing zone segments like ScenarioCreate.
 */
 func SHIELD_Testing_OperationCreate[TState any](
 	name string,
 	startup func() (TState, error),
 	teardown func(state TState),
-	runScenarios func(state TState) []SHIELD_Testing_ScenarioRunResult,
+	runScenarios func(state TState, execCtx SHIELD_Testing_ExecutionContext) []SHIELD_Testing_ScenarioRunResult,
 	zones ...string,
 ) SHIELD_Testing_Operation[TState] {
 	zonePath := SHIELD_Testing_ZonePathCreate(zones...)
@@ -278,7 +280,7 @@ SHIELD_Testing_OperationCreateStateless is like SHIELD_Testing_OperationCreate e
 */
 func SHIELD_Testing_OperationCreateStateless(
 	name string,
-	runScenarios func(_ struct{}) []SHIELD_Testing_ScenarioRunResult,
+	runScenarios func(_ struct{}, execCtx SHIELD_Testing_ExecutionContext) []SHIELD_Testing_ScenarioRunResult,
 	zones ...string,
 ) SHIELD_Testing_Operation[struct{}] {
 	zonePath := SHIELD_Testing_ZonePathCreate(zones...)
@@ -295,6 +297,9 @@ func SHIELD_Testing_OperationCreateStateless(
 /*
 SHIELD_Testing_OperationRun executes guarded startup/scenario/teardown choreography returning OperationRun aggregates without bubbling panics to callers.
 */
-func SHIELD_Testing_OperationRun[TState any](operation *SHIELD_Testing_Operation[TState]) SHIELD_Testing_OperationRunResult {
-	return internal.OperationRun(operation)
+func SHIELD_Testing_OperationRun[TState any](
+	operation *SHIELD_Testing_Operation[TState],
+	execCtx SHIELD_Testing_ExecutionContext,
+) SHIELD_Testing_OperationRunResult {
+	return internal.OperationRun(operation, execCtx)
 }

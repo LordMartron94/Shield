@@ -10,12 +10,14 @@ import (
 
 func TestShield(t *testing.T) {
 	scenario := buildSumScenario()
-	result := shield.SHIELD_Testing_ScenarioRun(scenario, shield.SHIELD_Testing_ScenarioRunConfig{
-		MaxIterations: 1,
+	execCtx := shield.SHIELD_Testing_ExecutionContext{
 		Identity: shield.SHIELD_Testing_SystemIdentity{
 			Version:     "v1",
 			Environment: "local",
 		},
+	}
+	result := shield.SHIELD_Testing_ScenarioRun(scenario, execCtx, shield.SHIELD_Testing_ScenarioRunConfig{
+		MaxIterations: 1,
 	})
 	overhead := extractResultOverhead(result)
 
@@ -42,22 +44,17 @@ func init() {
 
 	runCfg := shield.SHIELD_Testing_ScenarioRunConfig{
 		MaxIterations: 1,
-		Identity: shield.SHIELD_Testing_SystemIdentity{
-			Version:     "v1",
-			Environment: "local",
-		},
 	}
 
 	operation := shield.SHIELD_Testing_OperationCreateStateless(
 		"sum_test_operation",
-		func(_ struct{}) []shield.SHIELD_Testing_ScenarioRunResult {
+		func(_ struct{}, execCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
 			return []shield.SHIELD_Testing_ScenarioRunResult{
-				shield.SHIELD_Testing_ScenarioRun(scenario, runCfg),
+				shield.SHIELD_Testing_ScenarioRun(scenario, execCtx, runCfg),
 			}
 		},
 		[]string{"SHIELD", "Internal", "Sum"}...,
 	)
-
 	shield.SHIELD_Registry_OperationRegister(operation)
 }
 

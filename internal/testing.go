@@ -333,6 +333,10 @@ type SystemIdentity struct {
 	Environment string
 }
 
+type ExecutionContext struct {
+	Identity SystemIdentity
+}
+
 type Executor[TInput, TOutput any] func(input TInput) (output TOutput, error error)
 
 type Scenario[TInput, TOutput any] struct {
@@ -497,8 +501,6 @@ type ScenarioRunConfig struct {
 	MaxIterations uint64
 	MaxDuration   time.Duration
 	UseDuration   bool
-
-	Identity SystemIdentity // required non-empty Environment+Version; echoed into ScenarioRun snapshots
 }
 
 func ScenarioRunConfigFromSnapshot(
@@ -512,16 +514,16 @@ func ScenarioRunConfigFromSnapshot(
 		MaxDuration:            snapshot.MaxDuration,
 		UseDuration:            snapshot.UseDuration,
 		EntropyProviderFactory: entropyProviderFactory,
-		Identity:               snapshot.Identity,
 	}
 }
 
 func ScenarioRun[TInput, TOutput any](
 	scenario Scenario[TInput, TOutput],
+	execCtx ExecutionContext,
 	config ScenarioRunConfig,
 ) ScenarioRunResult {
-	if config.Identity.Version == "" || config.Identity.Environment == "" {
-		panic("engine error: scenario configuration must be set")
+	if execCtx.Identity.Version == "" || execCtx.Identity.Environment == "" {
+		panic("engine error: execution context identity must be set")
 	}
 
 	seed, _ := essence.UUIDv7GenerateRandom()
@@ -556,7 +558,7 @@ func ScenarioRun[TInput, TOutput any](
 			MaxDuration:    config.MaxDuration,
 			UseDuration:    config.UseDuration,
 			ProviderID:     entropyProviderID,
-			Identity:       config.Identity,
+			Identity:       execCtx.Identity,
 		},
 		zonePath: scenario.zonePath,
 	}
@@ -669,7 +671,7 @@ type Operation[TState any] struct {
 	startup  func() (TState, error)
 	teardown func(state TState)
 
-	runScenarios func(state TState) []ScenarioRunResult
+	runScenarios func(state TState, execCtx ExecutionContext) []ScenarioRunResult
 }
 
 func OperationCreate[TState any](
@@ -677,7 +679,7 @@ func OperationCreate[TState any](
 	zonePath ZonePath,
 	startup func() (TState, error),
 	teardown func(state TState),
-	runScenarios func(state TState) []ScenarioRunResult,
+	runScenarios func(state TState, execCtx ExecutionContext) []ScenarioRunResult,
 ) Operation[TState] {
 	return Operation[TState]{
 		name:         name,
@@ -688,7 +690,7 @@ func OperationCreate[TState any](
 	}
 }
 
-func OperationRun[TState any](operation *Operation[TState]) (result OperationRunResult) {
+func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionContext) (result OperationRunResult) {
 	start := time.Now()
 
 	result = OperationRunResult{
@@ -771,7 +773,7 @@ func OperationRun[TState any](operation *Operation[TState]) (result OperationRun
 				scenariosPanicMsg = fmt.Sprintf("%v", r)
 			}
 		}()
-		scenarioResults = operation.runScenarios(state)
+		scenarioResults = operation.runScenarios(state, execCtx)
 	}()
 
 	if scenariosPanicked {

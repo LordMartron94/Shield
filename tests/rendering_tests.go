@@ -10,6 +10,8 @@ import (
 func TestShieldRendering(t *testing.T) {
 	runConfig := shield.SHIELD_Testing_ScenarioRunConfig{
 		MaxIterations: 1,
+	}
+	execCtx := shield.SHIELD_Testing_ExecutionContext{
 		Identity: shield.SHIELD_Testing_SystemIdentity{
 			Version:     "v1",
 			Environment: "local",
@@ -17,12 +19,12 @@ func TestShieldRendering(t *testing.T) {
 	}
 
 	scenarios := []shield.SHIELD_Testing_ScenarioRunResult{
-		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Sum_Positive", "Math", "Addition"), runConfig),
-		shield.SHIELD_Testing_ScenarioRun(buildFailScenario("Sum_Negative", "Math", "Addition"), runConfig),
-		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Divide_Floats", "Math", "Division"), runConfig),
-		shield.SHIELD_Testing_ScenarioRun(buildFailScenario("Connect_Postgres", "Infrastructure", "Database"), runConfig),
-		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Ping_Redis", "Infrastructure", "Database"), runConfig),
-		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Parse_Config", "Core", "Config"), runConfig),
+		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Sum_Positive", "Math", "Addition"), execCtx, runConfig),
+		shield.SHIELD_Testing_ScenarioRun(buildFailScenario("Sum_Negative", "Math", "Addition"), execCtx, runConfig),
+		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Divide_Floats", "Math", "Division"), execCtx, runConfig),
+		shield.SHIELD_Testing_ScenarioRun(buildFailScenario("Connect_Postgres", "Infrastructure", "Database"), execCtx, runConfig),
+		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Ping_Redis", "Infrastructure", "Database"), execCtx, runConfig),
+		shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Parse_Config", "Core", "Config"), execCtx, runConfig),
 	}
 
 	modes := []struct {
@@ -53,14 +55,18 @@ func TestShieldRendering(t *testing.T) {
 func TestShieldRegressionRendering(t *testing.T) {
 	runConfigBase := shield.SHIELD_Testing_ScenarioRunConfig{
 		MaxIterations: 1,
+	}
+
+	runConfigTarget := shield.SHIELD_Testing_ScenarioRunConfig{
+		MaxIterations: 1,
+	}
+	execCtxBase := shield.SHIELD_Testing_ExecutionContext{
 		Identity: shield.SHIELD_Testing_SystemIdentity{
 			Version:     "v1",
 			Environment: "local",
 		},
 	}
-
-	runConfigTarget := shield.SHIELD_Testing_ScenarioRunConfig{
-		MaxIterations: 1,
+	execCtxTarget := shield.SHIELD_Testing_ExecutionContext{
 		Identity: shield.SHIELD_Testing_SystemIdentity{
 			Version:     "v2",
 			Environment: "local",
@@ -68,8 +74,8 @@ func TestShieldRegressionRendering(t *testing.T) {
 	}
 
 	// Generate physical runs strictly to satisfy the "Sources" temporal rendering
-	dummyBase := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), runConfigBase)
-	dummyTarget := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), runConfigTarget)
+	dummyBase := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), execCtxBase, runConfigBase)
+	dummyTarget := shield.SHIELD_Testing_ScenarioRun(buildPassScenario("Dummy"), execCtxTarget, runConfigTarget)
 
 	// -------------------------------------------------------------------------
 	// 1. Synthesize Identical Regression Data (Public API)
@@ -132,7 +138,7 @@ func TestShieldRegressionRendering(t *testing.T) {
 			AverageFailedIter: 85000,
 			EarliestRun:       now.Add(-48 * time.Hour),
 			LatestRun:         now.Add(-24 * time.Hour),
-			Identity:          runConfigBase.Identity,
+			Identity:          execCtxBase.Identity,
 		},
 		Target: shield.SHIELD_Regression_StabilityStats{
 			TotalRuns:         500,
@@ -141,7 +147,7 @@ func TestShieldRegressionRendering(t *testing.T) {
 			AverageFailedIter: 12000,
 			EarliestRun:       now.Add(-24 * time.Hour),
 			LatestRun:         now,
-			Identity:          runConfigTarget.Identity,
+			Identity:          execCtxTarget.Identity,
 		},
 	}
 
