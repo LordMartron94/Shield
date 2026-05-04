@@ -304,6 +304,13 @@ func (z ZonePath) Add(parts ...string) ZonePath {
 }
 
 /*
+Parts returns a copy of the zonepath's parts.
+*/
+func (z ZonePath) Parts() []string {
+	return slices.Clone(z.parts)
+}
+
+/*
 Render renders the path using the provided separator.
 */
 func (z ZonePath) Render(separator string) string {

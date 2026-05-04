@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	_ "shield/tests"
 )
 
 // TODO - create specific library for CLI

@@ -14,16 +14,25 @@ type RegisteredOperation struct {
 	runner   func() OperationRunResult
 }
 
-func RegisteredOperationRun(operation RegisteredOperation, config ScenarioRunConfig) OperationRunResult {
-	return operation.runner()
+/*
+Run executes the registered operation.
+*/
+func (o RegisteredOperation) Run(config ScenarioRunConfig) OperationRunResult {
+	return o.runner()
 }
 
-func RegisteredOperationName(operation RegisteredOperation) string {
-	return operation.name
+/*
+Name returns the registered operation's name.
+*/
+func (o RegisteredOperation) Name() string {
+	return o.name
 }
 
-func RegisteredOperationZonePath(operation RegisteredOperation) ZonePath {
-	return ZonePathCreate(slices.Clone(operation.zonePath.parts)...)
+/*
+ZonePath returns a copy of this registered operation's zone path.
+*/
+func (o RegisteredOperation) ZonePath() ZonePath {
+	return ZonePathCreate(slices.Clone(o.zonePath.parts)...)
 }
 
 var registryLock = &sync.Mutex{}

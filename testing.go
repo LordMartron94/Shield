@@ -274,6 +274,25 @@ func SHIELD_Testing_OperationCreate[TState any](
 }
 
 /*
+SHIELD_Testing_OperationCreateStateless is like SHIELD_Testing_OperationCreate except it doesn't use state.
+*/
+func SHIELD_Testing_OperationCreateStateless(
+	name string,
+	runScenarios func(_ struct{}) []SHIELD_Testing_ScenarioRunResult,
+	zones ...string,
+) SHIELD_Testing_Operation[struct{}] {
+	zonePath := SHIELD_Testing_ZonePathCreate(zones...)
+	return internal.OperationCreate(
+		name, zonePath,
+		func() (struct{}, error) {
+			return struct{}{}, nil
+		},
+		func(_ struct{}) {},
+		runScenarios,
+	)
+}
+
+/*
 SHIELD_Testing_OperationRun executes guarded startup/scenario/teardown choreography returning OperationRun aggregates without bubbling panics to callers.
 */
 func SHIELD_Testing_OperationRun[TState any](operation *SHIELD_Testing_Operation[TState]) SHIELD_Testing_OperationRunResult {

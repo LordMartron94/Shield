@@ -37,6 +37,30 @@ func TestShield(t *testing.T) {
 	t.Log(formatOverheadReport(result.Name(), "succeeded", overhead))
 }
 
+func init() {
+	scenario := buildSumScenario()
+
+	runCfg := shield.SHIELD_Testing_ScenarioRunConfig{
+		MaxIterations: 1,
+		Identity: shield.SHIELD_Testing_SystemIdentity{
+			Version:     "v1",
+			Environment: "local",
+		},
+	}
+
+	operation := shield.SHIELD_Testing_OperationCreateStateless(
+		"sum_test_operation",
+		func(_ struct{}) []shield.SHIELD_Testing_ScenarioRunResult {
+			return []shield.SHIELD_Testing_ScenarioRunResult{
+				shield.SHIELD_Testing_ScenarioRun(scenario, runCfg),
+			}
+		},
+		[]string{"SHIELD", "Internal", "Sum"}...,
+	)
+
+	shield.SHIELD_Registry_OperationRegister(operation)
+}
+
 func buildSumScenario() shield.SHIELD_Testing_Scenario[[]int, int] {
 	guards := make([]shield.SHIELD_Testing_Guard[[]int, int], 1)
 	guards[0] = shield.SHIELD_Testing_GuardCreate(

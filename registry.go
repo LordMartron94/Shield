@@ -50,31 +50,3 @@ Supplying empty prefix matches rendered paths unconditionally (normally only use
 func SHIELD_Registry_FilterPredicateZonePathRenderedPrefix(renderedZonePathPrefix string) SHIELD_Registry_FilterPredicate {
 	return internal.FilterByZonePrefix(renderedZonePathPrefix)
 }
-
-/*
-SHIELD_Registry_RegisteredOperationName reads the Operation name assigned through SHIELD_Testing_OperationCreate.
-*/
-func SHIELD_Registry_RegisteredOperationName(operation SHIELD_Registry_RegisteredOperation) string {
-	return internal.RegisteredOperationName(operation)
-}
-
-/*
-SHIELD_Registry_RegisteredOperationZonePath copies breadcrumb slices so downstream ZonePath mutations never alter internal registry bookkeeping.
-*/
-func SHIELD_Registry_RegisteredOperationZonePath(operation SHIELD_Registry_RegisteredOperation) SHIELD_Testing_ZonePath {
-	return internal.RegisteredOperationZonePath(operation)
-}
-
-/*
-SHIELD_Registry_RegisteredOperationRun replays OperationRun choreography through the same deferred teardown and synthesized telemetry scaffolding as SHIELD_Testing_OperationRun.
-
-runConfig presently does not propagate into OperationRun—the parameter exists so future registry runners can honour Scenario parity without breaking call sites—but callers planning immediate parity should mirror whatever configs their Scenario harness already supplies anyway.
-
-Panic paths convert into framed synthetic Scenario aggregates instead of bubbling through this facade.
-*/
-func SHIELD_Registry_RegisteredOperationRun(
-	operation SHIELD_Registry_RegisteredOperation,
-	runConfig SHIELD_Testing_ScenarioRunConfig,
-) SHIELD_Testing_OperationRunResult {
-	return internal.RegisteredOperationRun(operation, runConfig)
-}

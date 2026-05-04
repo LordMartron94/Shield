@@ -33,6 +33,7 @@ func RunLoop(renderer *internal.Renderer) {
 
 		parts := strings.Fields(input)
 		requestedCommand := parts[0]
+		args := parts[1:]
 
 		if cmd, exist := CommandMap[requestedCommand]; !exist {
 			renderer.WriteColor(builder, internal.ColorFail)
@@ -41,7 +42,7 @@ func RunLoop(renderer *internal.Renderer) {
 			fmt.Print(builder.String())
 			builder.Reset()
 		} else {
-			shouldExit := cmd.Runner(renderer, builder)
+			shouldExit := cmd.Runner(renderer, builder, args)
 
 			fmt.Print(builder.String())
 			builder.Reset()
