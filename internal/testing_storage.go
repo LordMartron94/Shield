@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"essence"
 	"fmt"
+	"os"
+	"path/filepath"
 	"persistence"
 	"time"
 )
@@ -76,7 +78,8 @@ type guardResultEntity struct {
 // --------------------------------------------------------------- DATABASE
 
 type TestResultDatabase struct {
-	engine *persistence.SQLite3Repo
+	engine     *persistence.SQLite3Repo
+	dbFilePath string
 }
 
 func TestResultDatabaseCreate(dbFilePath string) *TestResultDatabase {
@@ -93,13 +96,18 @@ func TestResultDatabaseCreate(dbFilePath string) *TestResultDatabase {
 	repoEngine := persistence.SQLite3RepoCreate(repoConfig)
 
 	return &TestResultDatabase{
-		engine: repoEngine,
+		engine:     repoEngine,
+		dbFilePath: dbFilePath,
 	}
 }
 
 func TestResultDatabaseInitialize(db *TestResultDatabase) error {
 	if persistence.SQLite3RepoIsOpen(db.engine) {
 		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(db.dbFilePath), 0755); err != nil {
+		return fmt.Errorf("failed to provision database directory: %w", err)
 	}
 
 	if err := persistence.SQLite3RepoInitialize(db.engine); err != nil {

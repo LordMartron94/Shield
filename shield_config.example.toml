@@ -1,0 +1,20 @@
+# To use this configuration file, copy it over to a location of your choice and rename it to `shield_config.toml`
+#
+# Alternatively, you can rename it to anything you like and provide the path of the configuration to the SHIELD shell.
+
+[environment]
+name 		= "local"
+db_path 	= ".shield/telemetry.sqlite"
+color_mode 	= "color-true" # none | ansi16 | color-true
+
+[zones]
+# Here you map ZonePaths (using . as separator) to their physical directories.
+# For example: 
+# "Network.Auth" = "libs/network/authorization"
+#
+# This allows the SHIELD cli to automatically detect which tests need rerunning.
+#
+# Note: any test using a zone that is not mapped here will be ran every time, because SHIELD cannot prove it does not need rerunning.
+# You can use the special syntax "<always>" as well to always run a test.
+
+"Network.Auth" = "libs/network/authorization"
