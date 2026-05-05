@@ -7,6 +7,15 @@ name 		= "local"
 db_path 	= ".shield/telemetry.sqlite"
 color_mode 	= "color-true" # none | ansi16 | color-true
 
+[discovery]
+# Explicit Go packages containing operation registrations.
+modules = [
+	"shield/tests"
+]
+
+[runtime]
+transient = false  # Don't turn on; this disables test discovery and currently would mean no tests are registered.
+
 [zones]
 # Here you map ZonePaths (using . as separator) to their physical directories.
 # For example: 

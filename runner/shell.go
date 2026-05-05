@@ -1,4 +1,4 @@
-package main
+package runner
 
 import (
 	"bufio"
@@ -22,12 +22,7 @@ type ShellContext struct {
 	ConfigPath string
 }
 
-func RunLoop(
-	cfg *ShieldConfiguration,
-	storage *shield.SHIELD_Testing_Storage_Engine,
-	renderer *internal.Renderer,
-	configPath string,
-) {
+func RunLoop(cfg *ShieldConfiguration, storage *shield.SHIELD_Testing_Storage_Engine, renderer *internal.Renderer, configPath string) {
 	fmt.Println("Welcome to the SHIELD shell!")
 	fmt.Println("Type 'help' to see available commands.")
 
@@ -61,7 +56,6 @@ func RunLoop(
 		if input == "" {
 			continue
 		}
-
 		parts := strings.Fields(input)
 		requestedCommand := parts[0]
 		args := parts[1:]
@@ -74,10 +68,8 @@ func RunLoop(
 			ctx.Builder.Reset()
 		} else {
 			shouldExit := cmd.Runner(ctx, args)
-
 			fmt.Print(ctx.Builder.String())
 			ctx.Builder.Reset()
-
 			if shouldExit {
 				return
 			}
@@ -85,13 +77,7 @@ func RunLoop(
 	}
 }
 
-func RunSingleCommand(
-	cfg *ShieldConfiguration,
-	storage *shield.SHIELD_Testing_Storage_Engine,
-	renderer *internal.Renderer,
-	commandLine string,
-	configPath string,
-) error {
+func RunSingleCommand(cfg *ShieldConfiguration, storage *shield.SHIELD_Testing_Storage_Engine, renderer *internal.Renderer, commandLine string, configPath string) error {
 	gitRoot, err := resolveGitRoot()
 	if err != nil {
 		return fmt.Errorf("fatal infrastructure error: shield must be run inside a git repository: %w", err)
@@ -111,15 +97,12 @@ func RunSingleCommand(
 	if len(parts) == 0 {
 		return nil
 	}
-
 	requestedCommand := parts[0]
 	args := parts[1:]
-
 	cmd, exist := CommandMap[requestedCommand]
 	if !exist {
 		return fmt.Errorf("requested command '%s' does not exist", requestedCommand)
 	}
-
 	cmd.Runner(ctx, args)
 	fmt.Print(ctx.Builder.String())
 	return nil
