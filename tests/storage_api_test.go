@@ -15,7 +15,7 @@ func TestStorageOperationVersionLookups(t *testing.T) {
 	defer shield.SHIELD_Testing_Storage_EngineClose(storage)
 
 	env := "local"
-	operationScope := "ops.alpha"
+	operationScope := "storage_scope_api_operation"
 	scenarioZonePath := "ops.alpha.case"
 
 	persistStorageScenarioVersionForTest(t, storage, env, "git-v1", scenarioZonePath)
@@ -90,7 +90,7 @@ func persistStorageScenarioVersionForTest(
 		strings.Split(scenarioZonePath, ".")...,
 	)
 
-	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, result); err != nil {
+	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, "storage_scope_api_operation", result); err != nil {
 		t.Fatalf("expected scenario result add to succeed, got error: %v", err)
 	}
 }

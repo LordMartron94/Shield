@@ -19,6 +19,7 @@ const (
 	// Scenario Columns
 	colScenarioID       = "result_id"
 	colScenarioName     = "scenario_name"
+	colOperationName    = "operation_name"
 	colScenarioZonePath = "zone_path"
 	colTimestamp        = "timestamp"
 	colPassed           = "passed"
@@ -49,6 +50,7 @@ const (
 type testResultEntity struct {
 	ResultID         string
 	ScenarioName     string
+	OperationName    string
 	ScenarioZonePath string
 	Timestamp        int64 // Unix milliseconds
 	Passed           int   // 0 or 1
@@ -150,6 +152,12 @@ func createTestResultsTableDef() persistence.SQLite3TableConfiguration[testResul
 			colScenarioName, persistence.SQLiteDataTypeText,
 			func(t *testResultEntity) any { return t.ScenarioName },
 			func(t *testResultEntity) any { return &t.ScenarioName },
+			persistence.SQLite3SchemaFieldOptionsFilterable(),
+		),
+		persistence.SQLite3SchemaFieldCreateManual(
+			colOperationName, persistence.SQLiteDataTypeText,
+			func(t *testResultEntity) any { return t.OperationName },
+			func(t *testResultEntity) any { return &t.OperationName },
 			persistence.SQLite3SchemaFieldOptionsFilterable(),
 		),
 		persistence.SQLite3SchemaFieldCreateManual(
@@ -296,14 +304,14 @@ func createGuardResultsTableDef() persistence.SQLite3TableConfiguration[guardRes
 
 // --------------------------------------------------------------- OPERATIONS
 
-func TestResultDatabaseScenarioResultAdd(db *TestResultDatabase, scenarioResult ScenarioRunResult) error {
+func TestResultDatabaseScenarioResultAdd(db *TestResultDatabase, operationName string, scenarioResult ScenarioRunResult) error {
 	if err := testResultDatabaseEnsureOpen(db); err != nil {
 		return err
 	}
 
 	scenarioID, _ := essence.UUIDv7GenerateRandom()
 
-	scenarioEntity := mapScenarioToEntity(scenarioResult, scenarioID.String())
+	scenarioEntity := mapScenarioToEntity(scenarioResult, scenarioID.String(), operationName)
 	guardEntities := mapGuardsToEntities(scenarioID.String(), scenarioResult.GuardResults())
 
 	guardPointers := make([]*guardResultEntity, len(guardEntities))
@@ -423,6 +431,7 @@ StoredScenarioSummary is a lightweight projection for listing persisted scenario
 type StoredScenarioSummary struct {
 	ResultID    string
 	Name        string
+	Operation   string
 	ZonePath    string
 	Timestamp   time.Time
 	Passed      bool
@@ -495,7 +504,7 @@ TestResultDatabaseGetLatestOperationVersion returns the most recently persisted 
 */
 func TestResultDatabaseGetLatestOperationVersion(
 	db *TestResultDatabase,
-	operationZonePath string,
+	operationName string,
 	environment string,
 ) (string, bool, error) {
 	if err := testResultDatabaseEnsureOpen(db); err != nil {
@@ -506,17 +515,17 @@ func TestResultDatabaseGetLatestOperationVersion(
 		SELECT %s
 		FROM %s
 		WHERE %s = ?
-		  AND (%s = ? OR %s LIKE ?)
+		  AND %s = ?
 		ORDER BY %s DESC, %s DESC
 		LIMIT 1`,
 		colVersion,
 		testResultsTableName,
 		colEnvironment,
-		colScenarioZonePath, colScenarioZonePath,
+		colOperationName,
 		colTimestamp, colScenarioID,
 	)
 
-	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query, environment, operationZonePath, operationZonePath+".%")
+	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query, environment, operationName)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to query latest operation version: %w", err)
 	}
@@ -543,7 +552,7 @@ TestResultDatabaseOperationVersionExists reports whether any persisted scenario 
 */
 func TestResultDatabaseOperationVersionExists(
 	db *TestResultDatabase,
-	operationZonePath string,
+	operationName string,
 	environment string,
 	version string,
 ) (bool, error) {
@@ -556,14 +565,14 @@ func TestResultDatabaseOperationVersionExists(
 		FROM %s
 		WHERE %s = ?
 		  AND %s = ?
-		  AND (%s = ? OR %s LIKE ?)`,
+		  AND %s = ?`,
 		testResultsTableName,
 		colEnvironment,
 		colVersion,
-		colScenarioZonePath, colScenarioZonePath,
+		colOperationName,
 	)
 
-	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query, environment, version, operationZonePath, operationZonePath+".%")
+	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query, environment, version, operationName)
 	if err != nil {
 		return false, fmt.Errorf("failed to query operation version existence: %w", err)
 	}
@@ -625,11 +634,11 @@ func TestResultDatabaseListScenarioResultsPage(
 	}
 
 	query := fmt.Sprintf(`
-		SELECT %s, %s, %s, %s, %s, %s, %s
+		SELECT %s, %s, %s, %s, %s, %s, %s, %s
 		FROM %s
 		ORDER BY %s DESC, %s DESC
 		LIMIT ? OFFSET ?`,
-		colScenarioID, colScenarioName, colScenarioZonePath, colTimestamp, colPassed, colVersion, colEnvironment,
+		colScenarioID, colScenarioName, colOperationName, colScenarioZonePath, colTimestamp, colPassed, colVersion, colEnvironment,
 		testResultsTableName,
 		colTimestamp, colScenarioID,
 	)
@@ -644,19 +653,21 @@ func TestResultDatabaseListScenarioResultsPage(
 	for rows.Next() {
 		var id string
 		var name string
+		var operation string
 		var zonePath string
 		var timestampMS int64
 		var passedInt int
 		var version string
 		var environment string
 
-		if err := rows.Scan(&id, &name, &zonePath, &timestampMS, &passedInt, &version, &environment); err != nil {
+		if err := rows.Scan(&id, &name, &operation, &zonePath, &timestampMS, &passedInt, &version, &environment); err != nil {
 			return nil, fmt.Errorf("failed to scan scenario summary row: %w", err)
 		}
 
 		summaries = append(summaries, StoredScenarioSummary{
 			ResultID:    id,
 			Name:        name,
+			Operation:   operation,
 			ZonePath:    zonePath,
 			Timestamp:   time.UnixMilli(timestampMS),
 			Passed:      passedInt == 1,
@@ -670,6 +681,56 @@ func TestResultDatabaseListScenarioResultsPage(
 	}
 
 	return summaries, nil
+}
+
+func TestResultDatabaseGetLastOperationRunTimestamp(
+	db *TestResultDatabase,
+	operationName string,
+	environment string,
+) (time.Time, bool, error) {
+	lastSeen, _, found, err := TestResultDatabaseGetLastOperationRunSummary(db, operationName, environment)
+	return lastSeen, found, err
+}
+
+func TestResultDatabaseGetLastOperationRunSummary(
+	db *TestResultDatabase,
+	operationName string,
+	environment string,
+) (time.Time, bool, bool, error) {
+	if err := testResultDatabaseEnsureOpen(db); err != nil {
+		return time.Time{}, false, false, err
+	}
+	query := fmt.Sprintf(`
+		SELECT %s, %s
+		FROM %s
+		WHERE %s = ?
+		  AND %s = ?
+		ORDER BY %s DESC, %s DESC
+		LIMIT 1`,
+		colTimestamp,
+		colPassed,
+		testResultsTableName,
+		colEnvironment,
+		colOperationName,
+		colTimestamp, colScenarioID,
+	)
+	rows, err := persistence.SQLite3RepoQueryRaw(db.engine, query, environment, operationName)
+	if err != nil {
+		return time.Time{}, false, false, fmt.Errorf("failed to query latest operation timestamp: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return time.Time{}, false, false, nil
+	}
+	var lastSeenMs int64
+	var passedInt int
+	if err := rows.Scan(&lastSeenMs, &passedInt); err != nil {
+		return time.Time{}, false, false, fmt.Errorf("failed to scan latest operation timestamp: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return time.Time{}, false, false, fmt.Errorf("error during latest operation timestamp iteration: %w", err)
+	}
+	return time.UnixMilli(lastSeenMs), passedInt == 1, true, nil
 }
 
 // --------------------------------------------------------------- PRIVATE HELPERS
@@ -713,7 +774,7 @@ func mapEntityToScenario(scenario *testResultEntity, guards []*guardResultEntity
 	}
 }
 
-func mapScenarioToEntity(scenario ScenarioRunResult, scenarioID string) testResultEntity {
+func mapScenarioToEntity(scenario ScenarioRunResult, scenarioID string, operationName string) testResultEntity {
 	cfg := scenario.SnapshotConfig()
 
 	passedInt, useDurationInt := 0, 0
@@ -727,6 +788,7 @@ func mapScenarioToEntity(scenario ScenarioRunResult, scenarioID string) testResu
 	return testResultEntity{
 		ResultID:         scenarioID,
 		ScenarioName:     scenario.Name(),
+		OperationName:    operationName,
 		ScenarioZonePath: scenario.zonePath.Render(zonePathStorageSeparator),
 		Timestamp:        time.Now().UnixMilli(),
 		Passed:           passedInt,

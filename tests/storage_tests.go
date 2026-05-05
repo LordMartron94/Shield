@@ -31,7 +31,7 @@ func TestShieldStoragePublicAPI(t *testing.T) {
 	defer shield.SHIELD_Testing_Storage_EngineClose(storage)
 
 	// 2. Persistence
-	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, runResult); err != nil {
+	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, "storage_public_api_operation", runResult); err != nil {
 		t.Fatalf("expected scenario result to persist, got error: %v", err)
 	}
 
@@ -89,7 +89,7 @@ func TestShieldStorageOperationVersionLookups(t *testing.T) {
 	defer shield.SHIELD_Testing_Storage_EngineClose(storage)
 
 	env := "local"
-	operationScope := "ops.alpha"
+	operationScope := "storage_scope_operation"
 	scenarioZonePath := "ops.alpha.case"
 
 	persistStorageScenarioVersion(t, storage, env, "git-v1", scenarioZonePath)
@@ -166,7 +166,7 @@ func persistStorageScenarioVersion(
 		strings.Split(scenarioZonePath, ".")...,
 	)
 
-	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, result); err != nil {
+	if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(storage, "storage_scope_operation", result); err != nil {
 		t.Fatalf("expected scenario result add to succeed, got error: %v", err)
 	}
 }

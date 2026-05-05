@@ -269,7 +269,7 @@ func persistOperationResults(ctx *ShellContext, opName string, results []interna
 	}
 
 	for _, result := range results {
-		if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(ctx.Storage, result); err != nil {
+		if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(ctx.Storage, opName, result); err != nil {
 			ctx.Renderer.WriteColor(ctx.Builder, internal.ColorFail)
 			ctx.Builder.WriteString(fmt.Sprintf("  Failed to persist scenario %s: %v\n", result.Name(), err))
 			ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
@@ -328,7 +328,7 @@ func resolveImpactedTargets(ctx *ShellContext, allOps []internal.RegisteredOpera
 
 		absPhysicalDir := filepath.ToSlash(filepath.Join(ctx.GitRoot, physicalDir))
 		identity, isDirty := resolveOperationIdentity(ctx, absPhysicalDir)
-		opScope := op.ZonePath().Render(".")
+		opScope := op.Name()
 
 		if isDirty {
 			targets = append(targets, op)
@@ -437,7 +437,7 @@ func persistRunResults(ctx *ShellContext, results []internal.ScenarioRunResult, 
 	}
 
 	for _, result := range results {
-		if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(ctx.Storage, result); err != nil {
+		if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(ctx.Storage, "<unknown-operation>", result); err != nil {
 			ctx.Renderer.WriteColor(ctx.Builder, internal.ColorFail)
 			ctx.Builder.WriteString(fmt.Sprintf("Failed to persist scenario %s: %v\n", result.Name(), err))
 			ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)

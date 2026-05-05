@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Command struct {
@@ -74,7 +75,8 @@ func runListCommand(ctx *ShellContext, args []string) bool {
 	startIdx, endIdx, currentPage, totalPages := calculatePagination(len(allOps), args)
 	pageOps := allOps[startIdx:endIdx]
 	renderListHeader(ctx.Renderer, ctx.Builder, currentPage, totalPages, startIdx, endIdx, len(allOps))
-	renderOperationsTree(ctx.Renderer, ctx.Builder, pageOps)
+	operationRecency := fetchOperationRecencyLabels(ctx, pageOps)
+	renderOperationsTree(ctx.Renderer, ctx.Builder, pageOps, operationRecency)
 	renderListFooter(ctx.Renderer, ctx.Builder, currentPage, totalPages)
 	return false
 }
@@ -188,7 +190,7 @@ func persistOperationResults(ctx *ShellContext, opName string, results []interna
 		return
 	}
 	for _, result := range results {
-		if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(ctx.Storage, result); err != nil {
+		if err := shield.SHIELD_Testing_Storage_ScenarioResultAdd(ctx.Storage, opName, result); err != nil {
 			ctx.Renderer.WriteColor(ctx.Builder, internal.ColorFail)
 			ctx.Builder.WriteString(fmt.Sprintf("  Failed to persist scenario %s: %v\n", result.Name(), err))
 			ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
@@ -229,56 +231,60 @@ func resolveImpactedTargets(ctx *ShellContext, allOps []internal.RegisteredOpera
 		if physicalDir == "<always>" || physicalDir == "<unmapped>" {
 			targets = append(targets, op)
 			if physicalDir == "<always>" {
-				writeImpactedDecision(ctx, op, "RUN", "<always>", "always-on operation")
+				writeImpactedDecision(ctx, op, "RUN", "<always>", "always-on operation", "never")
 			} else {
-				writeImpactedDecision(ctx, op, "RUN", "<unmapped>", "unmapped zone, cannot infer commit from git location")
+				writeImpactedDecision(ctx, op, "RUN", "<unmapped>", "unmapped zone, cannot infer commit from git location", "never")
 			}
 			continue
 		}
 		absPhysicalDir := filepath.ToSlash(filepath.Join(ctx.GitRoot, physicalDir))
 		identity, isDirty := resolveOperationIdentity(ctx, absPhysicalDir)
-		opScope := op.ZonePath().Render(".")
+		opScope := op.Name()
 		if isDirty {
 			targets = append(targets, op)
-			writeImpactedDecision(ctx, op, "RUN", identity.Version, "dirty worktree (ephemeral run)")
+			lastRunLabel := resolveOperationLastRunLabel(ctx, op.Name())
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, "dirty worktree (ephemeral run)", lastRunLabel)
 			continue
 		}
 		latestVersion, latestExists, latestErr := shield.SHIELD_Testing_Storage_GetLatestOperationVersion(ctx.Storage, opScope, ctx.Config.Environment.Name)
 		if latestErr != nil {
 			targets = append(targets, op)
-			writeImpactedDecision(ctx, op, "RUN", identity.Version, fmt.Sprintf("storage lookup failed: %v", latestErr))
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, fmt.Sprintf("storage lookup failed: %v", latestErr), "unknown")
 			continue
 		}
 		if !latestExists {
 			targets = append(targets, op)
-			writeImpactedDecision(ctx, op, "RUN", identity.Version, "no persisted history for operation scope")
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, "no persisted history for operation scope", "never")
 			continue
 		}
 		if latestVersion == identity.Version {
-			writeImpactedDecision(ctx, op, "SKIP", identity.Version, "latest persisted commit matches current commit")
+			lastRunLabel := resolveOperationLastRunLabel(ctx, op.Name())
+			writeImpactedDecision(ctx, op, "SKIP", identity.Version, "latest persisted commit matches current commit", lastRunLabel)
 			continue
 		}
 
 		exists, existsErr := shield.SHIELD_Testing_Storage_OperationVersionExists(ctx.Storage, opScope, ctx.Config.Environment.Name, identity.Version)
 		if existsErr != nil {
 			targets = append(targets, op)
-			writeImpactedDecision(ctx, op, "RUN", identity.Version, fmt.Sprintf("version existence check failed: %v", existsErr))
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, fmt.Sprintf("version existence check failed: %v", existsErr), "unknown")
 			continue
 		}
 		if exists {
-			writeImpactedDecision(ctx, op, "SKIP", identity.Version, "commit already persisted for operation scope")
+			lastRunLabel := resolveOperationLastRunLabel(ctx, op.Name())
+			writeImpactedDecision(ctx, op, "SKIP", identity.Version, "commit already persisted for operation scope", lastRunLabel)
 			continue
 		}
 		targets = append(targets, op)
-		writeImpactedDecision(ctx, op, "RUN", identity.Version, "new commit not persisted for operation scope")
+		lastRunLabel := resolveOperationLastRunLabel(ctx, op.Name())
+		writeImpactedDecision(ctx, op, "RUN", identity.Version, "new commit not persisted for operation scope", lastRunLabel)
 	}
 	ctx.Builder.WriteString("\n")
 	return targets
 }
 
-func writeImpactedDecision(ctx *ShellContext, op internal.RegisteredOperation, action string, version string, reason string) {
+func writeImpactedDecision(ctx *ShellContext, op internal.RegisteredOperation, action string, version string, reason string, lastRun string) {
 	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
-	ctx.Builder.WriteString(fmt.Sprintf("  [%s] %s | zone=%s | version=%s | %s\n", action, op.Name(), op.ZonePath().Render("."), version, reason))
+	ctx.Builder.WriteString(fmt.Sprintf("  [%s] %s | zone=%s | version=%s | last_run=%s | %s\n", action, op.Name(), op.ZonePath().Render("."), version, lastRun, reason))
 	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
 }
 
@@ -287,7 +293,8 @@ func promptInteractiveTargetSelection(ctx *ShellContext, allOps []internal.Regis
 	ctx.Builder.WriteString("\n=== SELECT OPERATIONS ===\n")
 	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
 	for i, op := range allOps {
-		ctx.Builder.WriteString(fmt.Sprintf("  [%d] %s (Zone: %s)\n", i+1, op.Name(), op.ZonePath().Render(".")))
+		lastRunLabel := resolveOperationLastRunLabel(ctx, op.Name())
+		ctx.Builder.WriteString(fmt.Sprintf("  [%d] %s (Zone: %s | Last Run: %s)\n", i+1, op.Name(), op.ZonePath().Render("."), lastRunLabel))
 	}
 	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorHighlight)
 	ctx.Builder.WriteString("\nEnter indices to run (comma-separated), 'all', or 'cancel': ")
@@ -355,7 +362,7 @@ func renderListHeader(renderer *internal.Renderer, b *strings.Builder, current, 
 	renderer.WriteColor(b, internal.ColorReset)
 }
 
-func renderOperationsTree(renderer *internal.Renderer, b *strings.Builder, ops []internal.RegisteredOperation) {
+func renderOperationsTree(renderer *internal.Renderer, b *strings.Builder, ops []internal.RegisteredOperation, operationRecency map[string]string) {
 	var prevPath []string
 	for _, op := range ops {
 		currPath := op.ZonePath().Parts()
@@ -377,9 +384,54 @@ func renderOperationsTree(renderer *internal.Renderer, b *strings.Builder, ops [
 		b.WriteString("» ")
 		renderer.WriteColor(b, internal.ColorReset)
 		b.WriteString(op.Name())
+		b.WriteString(fmt.Sprintf(" (last run: %s)", operationRecency[op.Name()]))
 		b.WriteString("\n")
 		prevPath = currPath
 	}
+}
+
+func fetchOperationRecencyLabels(ctx *ShellContext, operations []internal.RegisteredOperation) map[string]string {
+	labels := make(map[string]string, len(operations))
+	now := time.Now()
+	for _, op := range operations {
+		labels[op.Name()] = resolveOperationLastRunLabelAt(ctx, op.Name(), now)
+	}
+	return labels
+}
+
+func resolveOperationLastRunLabel(ctx *ShellContext, operationName string) string {
+	return resolveOperationLastRunLabelAt(ctx, operationName, time.Now())
+}
+
+func resolveOperationLastRunLabelAt(ctx *ShellContext, operationName string, now time.Time) string {
+	lastRun, passed, found, err := shield.SHIELD_Testing_Storage_GetLastOperationRunSummary(ctx.Storage, operationName, ctx.Config.Environment.Name)
+	if err != nil {
+		return "unknown"
+	}
+	if !found {
+		return "never"
+	}
+	stateLabel := "PASS"
+	if !passed {
+		stateLabel = "FAIL"
+	}
+	return fmt.Sprintf("%s (%s)", formatRelativeTime(now.Sub(lastRun)), stateLabel)
+}
+
+func formatRelativeTime(delta time.Duration) string {
+	if delta < 0 {
+		delta = 0
+	}
+	if delta < time.Minute {
+		return "just now"
+	}
+	if delta < time.Hour {
+		return fmt.Sprintf("%dm ago", int(delta.Minutes()))
+	}
+	if delta < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(delta.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(delta.Hours()/24))
 }
 
 func renderListFooter(renderer *internal.Renderer, b *strings.Builder, current, total int) {

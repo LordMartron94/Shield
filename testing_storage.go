@@ -1,6 +1,9 @@
 package shield
 
-import "shield/internal"
+import (
+	"shield/internal"
+	"time"
+)
 
 /*
 SHIELD_Testing_Storage_Engine is the public facade handle for SHIELD's internal SQLite-backed testing storage engine.
@@ -14,6 +17,10 @@ runs regardless of pass/failure. Enumerate these before pinning SHIELD_Testing_S
 through SHIELD_Testing_Storage_ScenarioResultFindByIdentity.
 */
 type SHIELD_Testing_Storage_CohortVersionRecord = internal.CohortVersionRecord
+
+/*
+SHIELD_Testing_Storage_StoredScenarioSummary is the lightweight row projection returned by paged storage listing calls.
+*/
 type SHIELD_Testing_Storage_StoredScenarioSummary = internal.StoredScenarioSummary
 
 /*
@@ -42,9 +49,10 @@ SHIELD_Testing_Storage_ScenarioResultAdd persists one scenario run result and al
 */
 func SHIELD_Testing_Storage_ScenarioResultAdd(
 	engine *SHIELD_Testing_Storage_Engine,
+	operationName string,
 	scenarioResult SHIELD_Testing_ScenarioRunResult,
 ) error {
-	return internal.TestResultDatabaseScenarioResultAdd(engine, scenarioResult)
+	return internal.TestResultDatabaseScenarioResultAdd(engine, operationName, scenarioResult)
 }
 
 /*
@@ -104,28 +112,58 @@ func SHIELD_Testing_Storage_GetCohortVersions(
 /*
 SHIELD_Testing_Storage_GetLatestOperationVersion returns the newest persisted identity Version for an operation scope.
 
-The scope matches rows where persisted zone_path equals operationZonePath or starts with operationZonePath plus a dot separator.
+The scope is strict by operation_name plus environment.
 */
 func SHIELD_Testing_Storage_GetLatestOperationVersion(
 	engine *SHIELD_Testing_Storage_Engine,
-	operationZonePath string,
+	operationName string,
 	environment string,
 ) (string, bool, error) {
-	return internal.TestResultDatabaseGetLatestOperationVersion(engine, operationZonePath, environment)
+	return internal.TestResultDatabaseGetLatestOperationVersion(engine, operationName, environment)
 }
 
 /*
 SHIELD_Testing_Storage_OperationVersionExists reports whether operation scope already has persisted rows for environment + version.
 
-The scope matches rows where persisted zone_path equals operationZonePath or starts with operationZonePath plus a dot separator.
+The scope is strict by operation_name plus environment and version.
 */
 func SHIELD_Testing_Storage_OperationVersionExists(
 	engine *SHIELD_Testing_Storage_Engine,
-	operationZonePath string,
+	operationName string,
 	environment string,
 	version string,
 ) (bool, error) {
-	return internal.TestResultDatabaseOperationVersionExists(engine, operationZonePath, environment, version)
+	return internal.TestResultDatabaseOperationVersionExists(engine, operationName, environment, version)
+}
+
+/*
+SHIELD_Testing_Storage_GetLastOperationRunTimestamp returns the most recent persisted timestamp for operation_name + environment.
+
+The boolean return value reports whether a row was found for that operation scope.
+*/
+func SHIELD_Testing_Storage_GetLastOperationRunTimestamp(
+	engine *SHIELD_Testing_Storage_Engine,
+	operationName string,
+	environment string,
+) (time.Time, bool, error) {
+	return internal.TestResultDatabaseGetLastOperationRunTimestamp(engine, operationName, environment)
+}
+
+/*
+SHIELD_Testing_Storage_GetLastOperationRunSummary returns the most recent persisted timestamp and pass/fail state for operation_name + environment.
+
+Return tuple:
+- time.Time: last seen row timestamp
+- bool (passed): whether that latest row passed
+- bool (found): whether any row exists for that operation scope
+- error: storage/query error if encountered
+*/
+func SHIELD_Testing_Storage_GetLastOperationRunSummary(
+	engine *SHIELD_Testing_Storage_Engine,
+	operationName string,
+	environment string,
+) (time.Time, bool, bool, error) {
+	return internal.TestResultDatabaseGetLastOperationRunSummary(engine, operationName, environment)
 }
 
 /*
