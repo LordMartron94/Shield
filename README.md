@@ -37,12 +37,6 @@ The installer is intentionally scoped to SHIELD requirements only.
 From the SHIELD repository root:
 
 ```bash
-make shield
-```
-
-Or directly:
-
-```bash
 go run ./cmd -configuration-path ./shield_config.example.toml
 ```
 
