@@ -57,9 +57,14 @@ Example config:
 Important sections:
 
 - `[environment]`: database path + rendering mode
-- `[discovery]`: modules to blank-import for registration discovery (canonical `shield/...` paths)
+- `[discovery]`: directories containing SHIELD registrations; relative entries resolve from the configuration file location and are converted to Go import paths automatically
 - `[runtime]`: transient bootstrap switch (managed by SHIELD runtime)
 - `[zones]`: zone prefix to physical directory mapping for impacted heuristics
+
+Descriptions:
+
+- operation and scenario descriptions are optional in-memory metadata for shell/report rendering
+- descriptions are never persisted to SQLite storage
 
 ## Architecture Notes
 
@@ -69,4 +74,3 @@ Important sections:
 - Internal implementation is isolated under `internal`.
 
 Transient shell bootstrap generates a tiny glue runner under `.shield/transient/cmd` that imports configured discovery modules and delegates into SHIELD runner logic.
-

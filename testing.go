@@ -186,6 +186,18 @@ func SHIELD_Testing_ScenarioCreate[TInput, TOutput any](
 }
 
 /*
+SHIELD_Testing_ScenarioDescriptionSet attaches in-memory presentation metadata to a scenario definition.
+
+This description is used for CLI/shell rendering only and is never persisted to storage.
+*/
+func SHIELD_Testing_ScenarioDescriptionSet[TInput, TOutput any](
+	scenario *SHIELD_Testing_Scenario[TInput, TOutput],
+	description string,
+) {
+	internal.ScenarioDescriptionSet(scenario, description)
+}
+
+/*
 SHIELD_Testing_OperationRunScenario executes a scenario inside an operation callback using the callback's execution context.
 */
 func SHIELD_Testing_OperationRunScenario[TInput, TOutput any](
@@ -253,6 +265,18 @@ func SHIELD_Testing_OperationCreateStateless(
 		func(_ struct{}) {},
 		runScenarios,
 	)
+}
+
+/*
+SHIELD_Testing_OperationDescriptionSet attaches in-memory presentation metadata to an operation definition.
+
+This description is used for CLI/shell rendering only and is never persisted to storage.
+*/
+func SHIELD_Testing_OperationDescriptionSet[TState any](
+	operation *SHIELD_Testing_Operation[TState],
+	description string,
+) {
+	internal.OperationDescriptionSet(operation, description)
 }
 
 /*

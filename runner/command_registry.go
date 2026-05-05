@@ -295,6 +295,9 @@ func promptInteractiveTargetSelection(ctx *ShellContext, allOps []internal.Regis
 	for i, op := range allOps {
 		lastRunLabel := resolveOperationLastRunLabel(ctx, op.Name())
 		ctx.Builder.WriteString(fmt.Sprintf("  [%d] %s (Zone: %s | Last Run: %s)\n", i+1, op.Name(), op.ZonePath().Render("."), lastRunLabel))
+		if strings.TrimSpace(op.Description()) != "" {
+			ctx.Builder.WriteString(fmt.Sprintf("      %s\n", strings.TrimSpace(op.Description())))
+		}
 	}
 	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorHighlight)
 	ctx.Builder.WriteString("\nEnter indices to run (comma-separated), 'all', or 'cancel': ")
@@ -386,6 +389,14 @@ func renderOperationsTree(renderer *internal.Renderer, b *strings.Builder, ops [
 		b.WriteString(op.Name())
 		b.WriteString(fmt.Sprintf(" (last run: %s)", operationRecency[op.Name()]))
 		b.WriteString("\n")
+		if strings.TrimSpace(op.Description()) != "" {
+			b.WriteString(opIndent)
+			b.WriteString("  ")
+			renderer.WriteColor(b, internal.ColorMuted)
+			b.WriteString(strings.TrimSpace(op.Description()))
+			renderer.WriteColor(b, internal.ColorReset)
+			b.WriteString("\n")
+		}
 		prevPath = currPath
 	}
 }
