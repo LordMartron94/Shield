@@ -217,11 +217,22 @@ func resolveRunTargets(ctx *ShellContext, args []string) []internal.RegisteredOp
 }
 
 func resolveImpactedTargets(ctx *ShellContext, allOps []internal.RegisteredOperation) []internal.RegisteredOperation {
+	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
+	ctx.Builder.WriteString("\n=== IMPACT DIAGNOSTICS ===\n")
+	ctx.Builder.WriteString("Evaluating operation commit lineage from persisted scenario rows.\n")
+	ctx.Builder.WriteString("==========================\n")
+	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
+
 	var targets []internal.RegisteredOperation
 	for _, op := range allOps {
 		physicalDir := resolvePhysicalDirectory(ctx, op.ZonePath())
 		if physicalDir == "<always>" || physicalDir == "<unmapped>" {
 			targets = append(targets, op)
+			if physicalDir == "<always>" {
+				writeImpactedDecision(ctx, op, "RUN", "<always>", "always-on operation")
+			} else {
+				writeImpactedDecision(ctx, op, "RUN", "<unmapped>", "unmapped zone, cannot infer commit from git location")
+			}
 			continue
 		}
 		absPhysicalDir := filepath.ToSlash(filepath.Join(ctx.GitRoot, physicalDir))
@@ -229,16 +240,46 @@ func resolveImpactedTargets(ctx *ShellContext, allOps []internal.RegisteredOpera
 		opScope := op.ZonePath().Render(".")
 		if isDirty {
 			targets = append(targets, op)
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, "dirty worktree (ephemeral run)")
 			continue
 		}
 		latestVersion, latestExists, latestErr := shield.SHIELD_Testing_Storage_GetLatestOperationVersion(ctx.Storage, opScope, ctx.Config.Environment.Name)
-		if latestErr != nil || !latestExists || latestVersion != identity.Version {
-			if exists, existsErr := shield.SHIELD_Testing_Storage_OperationVersionExists(ctx.Storage, opScope, ctx.Config.Environment.Name, identity.Version); existsErr != nil || !exists {
-				targets = append(targets, op)
-			}
+		if latestErr != nil {
+			targets = append(targets, op)
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, fmt.Sprintf("storage lookup failed: %v", latestErr))
+			continue
 		}
+		if !latestExists {
+			targets = append(targets, op)
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, "no persisted history for operation scope")
+			continue
+		}
+		if latestVersion == identity.Version {
+			writeImpactedDecision(ctx, op, "SKIP", identity.Version, "latest persisted commit matches current commit")
+			continue
+		}
+
+		exists, existsErr := shield.SHIELD_Testing_Storage_OperationVersionExists(ctx.Storage, opScope, ctx.Config.Environment.Name, identity.Version)
+		if existsErr != nil {
+			targets = append(targets, op)
+			writeImpactedDecision(ctx, op, "RUN", identity.Version, fmt.Sprintf("version existence check failed: %v", existsErr))
+			continue
+		}
+		if exists {
+			writeImpactedDecision(ctx, op, "SKIP", identity.Version, "commit already persisted for operation scope")
+			continue
+		}
+		targets = append(targets, op)
+		writeImpactedDecision(ctx, op, "RUN", identity.Version, "new commit not persisted for operation scope")
 	}
+	ctx.Builder.WriteString("\n")
 	return targets
+}
+
+func writeImpactedDecision(ctx *ShellContext, op internal.RegisteredOperation, action string, version string, reason string) {
+	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
+	ctx.Builder.WriteString(fmt.Sprintf("  [%s] %s | zone=%s | version=%s | %s\n", action, op.Name(), op.ZonePath().Render("."), version, reason))
+	ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)
 }
 
 func promptInteractiveTargetSelection(ctx *ShellContext, allOps []internal.RegisteredOperation) []internal.RegisteredOperation {
