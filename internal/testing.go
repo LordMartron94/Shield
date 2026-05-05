@@ -351,19 +351,16 @@ type Scenario[TInput, TOutput any] struct {
 
 func ScenarioCreate[TInput, TOutput any](
 	name string,
+	description string,
 	guards []Guard[TInput, TOutput],
 	executor Executor[TInput, TOutput],
 ) Scenario[TInput, TOutput] {
 	return Scenario[TInput, TOutput]{
 		name:        name,
-		description: "",
+		description: description,
 		guards:      guards,
 		executor:    executor,
 	}
-}
-
-func ScenarioDescriptionSet[TInput, TOutput any](scenario *Scenario[TInput, TOutput], description string) {
-	scenario.description = description
 }
 
 type GuardEvaluationResult struct {
@@ -692,6 +689,7 @@ type Operation[TState any] struct {
 
 func OperationCreate[TState any](
 	name string,
+	description string,
 	zonePath ZonePath,
 	startup func() (TState, error),
 	teardown func(state TState),
@@ -699,16 +697,12 @@ func OperationCreate[TState any](
 ) Operation[TState] {
 	return Operation[TState]{
 		name:         name,
-		description:  "",
+		description:  description,
 		zonePath:     zonePath,
 		startup:      startup,
 		teardown:     teardown,
 		runScenarios: runScenarios,
 	}
-}
-
-func OperationDescriptionSet[TState any](operation *Operation[TState], description string) {
-	operation.description = description
 }
 
 func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionContext) (result OperationRunResult) {

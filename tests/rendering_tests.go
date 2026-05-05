@@ -194,6 +194,7 @@ func buildPassScenario(name string) shield.SHIELD_Testing_Scenario[int, int] {
 
 	return shield.SHIELD_Testing_ScenarioCreate(
 		name,
+		"",
 		[]shield.SHIELD_Testing_Guard[int, int]{guard},
 		func(input int) (int, error) {
 			return input, nil
@@ -214,6 +215,7 @@ func buildFailScenario(name string) shield.SHIELD_Testing_Scenario[int, int] {
 
 	return shield.SHIELD_Testing_ScenarioCreate(
 		name,
+		"",
 		[]shield.SHIELD_Testing_Guard[int, int]{guard},
 		func(input int) (int, error) {
 			return input, nil

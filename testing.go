@@ -176,25 +176,16 @@ type SHIELD_Testing_Scenario[TInput, TOutput any] = internal.Scenario[TInput, TO
 
 /*
 SHIELD_Testing_ScenarioCreate builds Scenario definitions without geographical metadata.
+
+Description is required at creation time; pass an explicit empty string if intentionally omitted.
 */
 func SHIELD_Testing_ScenarioCreate[TInput, TOutput any](
 	name string,
+	description string,
 	guards []SHIELD_Testing_Guard[TInput, TOutput],
 	executor SHIELD_Testing_Executor[TInput, TOutput],
 ) SHIELD_Testing_Scenario[TInput, TOutput] {
-	return internal.ScenarioCreate(name, guards, executor)
-}
-
-/*
-SHIELD_Testing_ScenarioDescriptionSet attaches in-memory presentation metadata to a scenario definition.
-
-This description is used for CLI/shell rendering only and is never persisted to storage.
-*/
-func SHIELD_Testing_ScenarioDescriptionSet[TInput, TOutput any](
-	scenario *SHIELD_Testing_Scenario[TInput, TOutput],
-	description string,
-) {
-	internal.ScenarioDescriptionSet(scenario, description)
+	return internal.ScenarioCreate(name, description, guards, executor)
 }
 
 /*
@@ -236,47 +227,41 @@ type SHIELD_Testing_OperationRunResult = internal.OperationRunResult
 
 /*
 SHIELD_Testing_OperationCreate registers lifecycle closures plus trailing zone segments like ScenarioCreate.
+
+Description is required at creation time; pass an explicit empty string if intentionally omitted.
 */
 func SHIELD_Testing_OperationCreate[TState any](
 	name string,
+	description string,
 	startup func() (TState, error),
 	teardown func(state TState),
 	runScenarios func(state TState, execCtx SHIELD_Testing_ExecutionContext) []SHIELD_Testing_ScenarioRunResult,
 	zones ...string,
 ) SHIELD_Testing_Operation[TState] {
 	zonePath := SHIELD_Testing_ZonePathCreate(zones...)
-	return internal.OperationCreate(name, zonePath, startup, teardown, runScenarios)
+	return internal.OperationCreate(name, description, zonePath, startup, teardown, runScenarios)
 }
 
 /*
 SHIELD_Testing_OperationCreateStateless is like SHIELD_Testing_OperationCreate except it doesn't use state.
+
+Description is required at creation time; pass an explicit empty string if intentionally omitted.
 */
 func SHIELD_Testing_OperationCreateStateless(
 	name string,
+	description string,
 	runScenarios func(_ struct{}, execCtx SHIELD_Testing_ExecutionContext) []SHIELD_Testing_ScenarioRunResult,
 	zones ...string,
 ) SHIELD_Testing_Operation[struct{}] {
 	zonePath := SHIELD_Testing_ZonePathCreate(zones...)
 	return internal.OperationCreate(
-		name, zonePath,
+		name, description, zonePath,
 		func() (struct{}, error) {
 			return struct{}{}, nil
 		},
 		func(_ struct{}) {},
 		runScenarios,
 	)
-}
-
-/*
-SHIELD_Testing_OperationDescriptionSet attaches in-memory presentation metadata to an operation definition.
-
-This description is used for CLI/shell rendering only and is never persisted to storage.
-*/
-func SHIELD_Testing_OperationDescriptionSet[TState any](
-	operation *SHIELD_Testing_Operation[TState],
-	description string,
-) {
-	internal.OperationDescriptionSet(operation, description)
 }
 
 /*
@@ -307,6 +292,7 @@ func SHIELD_Testing_OperationRunReplayFromStoredAggregate[TInput, TOutput any](
 
 	op := SHIELD_Testing_OperationCreateStateless(
 		"replay_operation",
+		"",
 		func(_ struct{}, opCtx SHIELD_Testing_ExecutionContext) []SHIELD_Testing_ScenarioRunResult {
 			return []SHIELD_Testing_ScenarioRunResult{
 				internal.ScenarioRun(scenario, opCtx, runConfig),
