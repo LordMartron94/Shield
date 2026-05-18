@@ -341,7 +341,8 @@ type ExecutionContext struct {
 type Executor[TInput, TOutput any] func(input TInput) (output TOutput, error error)
 
 type Scenario[TInput, TOutput any] struct {
-	name string
+	name        string
+	description string
 
 	guards []Guard[TInput, TOutput]
 
@@ -350,13 +351,15 @@ type Scenario[TInput, TOutput any] struct {
 
 func ScenarioCreate[TInput, TOutput any](
 	name string,
+	description string,
 	guards []Guard[TInput, TOutput],
 	executor Executor[TInput, TOutput],
 ) Scenario[TInput, TOutput] {
 	return Scenario[TInput, TOutput]{
-		name:     name,
-		guards:   guards,
-		executor: executor,
+		name:        name,
+		description: description,
+		guards:      guards,
+		executor:    executor,
 	}
 }
 
@@ -405,6 +408,7 @@ type ScenarioRunResult struct {
 	// the run result is just how THIS endpoint models its result.
 	// this is therefore semantically different from how the engine will store it.
 	scenarioName string
+	description  string
 	zonePath     ZonePath
 
 	startedAt time.Time
@@ -434,6 +438,13 @@ Name returns the scenario name for this result.
 */
 func (s *ScenarioRunResult) Name() string {
 	return s.scenarioName
+}
+
+/*
+Description returns in-memory scenario description metadata.
+*/
+func (s *ScenarioRunResult) Description() string {
+	return s.description
 }
 
 /*
@@ -549,6 +560,7 @@ func ScenarioRun[TInput, TOutput any](
 
 	result := ScenarioRunResult{
 		scenarioName: scenario.name,
+		description:  scenario.description,
 		passed:       true,
 		guardResults: make([]GuardEvaluationResult, len(scenario.guards)),
 		runConfig: SnapshotConfig{
@@ -665,8 +677,9 @@ func (o *OperationRunResult) StartedAt() time.Time {
 }
 
 type Operation[TState any] struct {
-	name     string
-	zonePath ZonePath
+	name        string
+	description string
+	zonePath    ZonePath
 
 	startup  func() (TState, error)
 	teardown func(state TState)
@@ -676,6 +689,7 @@ type Operation[TState any] struct {
 
 func OperationCreate[TState any](
 	name string,
+	description string,
 	zonePath ZonePath,
 	startup func() (TState, error),
 	teardown func(state TState),
@@ -683,6 +697,7 @@ func OperationCreate[TState any](
 ) Operation[TState] {
 	return Operation[TState]{
 		name:         name,
+		description:  description,
 		zonePath:     zonePath,
 		startup:      startup,
 		teardown:     teardown,

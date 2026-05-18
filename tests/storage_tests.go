@@ -135,6 +135,7 @@ func persistStorageScenarioVersion(
 
 	scenario := shield.SHIELD_Testing_ScenarioCreate(
 		"storage_scope_scenario",
+		"",
 		[]shield.SHIELD_Testing_Guard[int, int]{
 			shield.SHIELD_Testing_GuardCreate(
 				"identity",

@@ -359,6 +359,12 @@ func renderTreeIllusion(b *strings.Builder, r *Renderer, scenarios []ScenarioRun
 
 		r.WriteColor(b, ColorReset)
 		b.WriteString(scenario.Name())
+		if strings.TrimSpace(scenario.Description()) != "" {
+			b.WriteString(" - ")
+			r.WriteColor(b, ColorMuted)
+			b.WriteString(strings.TrimSpace(scenario.Description()))
+			r.WriteColor(b, ColorReset)
+		}
 
 		r.WriteColor(b, ColorMuted)
 		b.WriteString(fmt.Sprintf(" (%v)\n", scenario.WallDuration()))

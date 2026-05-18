@@ -48,6 +48,7 @@ func init() {
 
 	operation := shield.SHIELD_Testing_OperationCreateStateless(
 		"sum_test_operation",
+		"",
 		func(_ struct{}, execCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
 			return []shield.SHIELD_Testing_ScenarioRunResult{
 				runScenarioWithContext(scenario, execCtx, runCfg),
@@ -76,6 +77,7 @@ func buildSumScenario() shield.SHIELD_Testing_Scenario[[]int, int] {
 
 	return shield.SHIELD_Testing_ScenarioCreate(
 		"test_scenario",
+		"",
 		guards,
 		func(input []int) (int, error) {
 			counter := 0
@@ -108,6 +110,7 @@ func runSingleScenario[TInput, TOutput any](
 
 	operation := shield.SHIELD_Testing_OperationCreateStateless(
 		opName,
+		"",
 		func(_ struct{}, opCtx shield.SHIELD_Testing_ExecutionContext) []shield.SHIELD_Testing_ScenarioRunResult {
 			return []shield.SHIELD_Testing_ScenarioRunResult{
 				runScenarioWithContext(scenario, opCtx, runCfg),

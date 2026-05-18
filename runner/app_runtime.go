@@ -1,8 +1,11 @@
 package runner
 
 import (
+	"bufio"
 	"fmt"
 	"foundation/system"
+	"os"
+	"path/filepath"
 	"shield"
 	"shield/internal"
 	"strings"
@@ -52,15 +55,11 @@ func loadShieldConfiguration(cfgPath string) (*ShieldConfiguration, error) {
 		return nil, fmt.Errorf("there was an error parsing the configuration: %w", decodeErr)
 	}
 
-	cfg.Discovery.Modules = normalizeDiscoveryModules(cfg.Discovery.Modules)
-	for _, mod := range cfg.Discovery.Modules {
-		if strings.TrimSpace(mod) == "" {
-			return nil, fmt.Errorf("discovery.modules cannot contain empty entries")
-		}
-		if !strings.HasPrefix(mod, "shield/") && mod != "shield" {
-			return nil, fmt.Errorf("discovery module '%s' is not canonical. use 'shield/...' module paths", mod)
-		}
+	resolvedModules, resolveErr := resolveDiscoveryModulesFromConfig(cfgPath, cfg.Discovery.Modules)
+	if resolveErr != nil {
+		return nil, resolveErr
 	}
+	cfg.Discovery.Modules = resolvedModules
 
 	if _, valid := colorModeMap[cfg.Environment.ColorMode]; !valid {
 		return nil, fmt.Errorf("unknown color mode: '%s'", cfg.Environment.ColorMode)
@@ -80,6 +79,106 @@ func normalizeDiscoveryModules(modules []string) []string {
 		normalized = append(normalized, trimmed)
 	}
 	return normalized
+}
+
+func resolveDiscoveryModulesFromConfig(cfgPath string, discoveryModules []string) ([]string, error) {
+	cfgAbsPath, absErr := filepath.Abs(cfgPath)
+	if absErr != nil {
+		return nil, fmt.Errorf("failed to resolve absolute config path: %w", absErr)
+	}
+	cfgDir := filepath.Dir(cfgAbsPath)
+
+	resolved := make([]string, 0, len(discoveryModules))
+	for _, moduleEntry := range normalizeDiscoveryModules(discoveryModules) {
+		trimmed := strings.TrimSpace(moduleEntry)
+		if trimmed == "" {
+			return nil, fmt.Errorf("discovery.modules cannot contain empty entries")
+		}
+
+		targetDir := trimmed
+		if !filepath.IsAbs(targetDir) {
+			targetDir = filepath.Join(cfgDir, targetDir)
+		}
+		targetDirAbs, targetAbsErr := filepath.Abs(targetDir)
+		if targetAbsErr != nil {
+			return nil, fmt.Errorf("failed to resolve discovery directory '%s': %w", trimmed, targetAbsErr)
+		}
+
+		info, statErr := os.Stat(targetDirAbs)
+		if statErr != nil {
+			// Transient mode persists already-resolved import paths into the copied config.
+			// If the entry is not a reachable directory from cfgPath, accept it as an import path.
+			if strings.Contains(trimmed, "/") || trimmed == "shield" {
+				resolved = append(resolved, filepath.ToSlash(trimmed))
+				continue
+			}
+			return nil, fmt.Errorf("discovery module directory '%s' not found from config '%s': %w", trimmed, cfgPath, statErr)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("discovery module '%s' must point to a directory", trimmed)
+		}
+
+		moduleRoot, modulePath, moduleErr := resolveGoModuleForDirectory(targetDirAbs)
+		if moduleErr != nil {
+			return nil, fmt.Errorf("failed resolving go module for discovery directory '%s': %w", trimmed, moduleErr)
+		}
+
+		relPath, relErr := filepath.Rel(moduleRoot, targetDirAbs)
+		if relErr != nil {
+			return nil, fmt.Errorf("failed computing discovery import path for '%s': %w", trimmed, relErr)
+		}
+		importPath := modulePath
+		if relPath != "." {
+			importPath = modulePath + "/" + filepath.ToSlash(relPath)
+		}
+		resolved = append(resolved, importPath)
+	}
+
+	return normalizeDiscoveryModules(resolved), nil
+}
+
+func resolveGoModuleForDirectory(startDir string) (string, string, error) {
+	current := startDir
+	for {
+		goModPath := filepath.Join(current, "go.mod")
+		info, err := os.Stat(goModPath)
+		if err == nil && !info.IsDir() {
+			modulePath, parseErr := parseModulePathFromGoMod(goModPath)
+			if parseErr != nil {
+				return "", "", parseErr
+			}
+			return current, modulePath, nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", "", fmt.Errorf("no go.mod found for directory '%s'", startDir)
+		}
+		current = parent
+	}
+}
+
+func parseModulePathFromGoMod(goModPath string) (string, error) {
+	file, err := os.Open(goModPath)
+	if err != nil {
+		return "", fmt.Errorf("failed reading go.mod at '%s': %w", goModPath, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "module ") {
+			modulePath := strings.TrimSpace(strings.TrimPrefix(line, "module "))
+			if modulePath == "" {
+				return "", fmt.Errorf("go.mod at '%s' has empty module path", goModPath)
+			}
+			return modulePath, nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("failed scanning go.mod at '%s': %w", goModPath, err)
+	}
+	return "", fmt.Errorf("go.mod at '%s' does not define a module path", goModPath)
 }
 
 func RunShieldEntrypoint(cfgPath string, commandArgs []string) error {

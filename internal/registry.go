@@ -9,9 +9,10 @@ import (
 // ----------------------------------------------------------- TYPES
 
 type RegisteredOperation struct {
-	name     string
-	zonePath ZonePath
-	runner   func(execCtx ExecutionContext) OperationRunResult
+	name        string
+	description string
+	zonePath    ZonePath
+	runner      func(execCtx ExecutionContext) OperationRunResult
 }
 
 /*
@@ -26,6 +27,13 @@ Name returns the registered operation's name.
 */
 func (o RegisteredOperation) Name() string {
 	return o.name
+}
+
+/*
+Description returns the registered operation description metadata.
+*/
+func (o RegisteredOperation) Description() string {
+	return o.description
 }
 
 /*
@@ -45,8 +53,9 @@ func OperationRegister[TState any](operation Operation[TState]) {
 	registryLock.Lock()
 
 	operationRegistry = append(operationRegistry, RegisteredOperation{
-		name:     operation.name,
-		zonePath: operation.zonePath,
+		name:        operation.name,
+		description: operation.description,
+		zonePath:    operation.zonePath,
 		runner: func(execCtx ExecutionContext) OperationRunResult {
 			return OperationRun(&operation, execCtx)
 		},
