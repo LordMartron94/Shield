@@ -8,7 +8,6 @@ import (
 	"shield"
 	"shield/extension"
 	"shield/internal"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +64,7 @@ func init() {
 }
 
 func runListCommand(ctx *ShellContext, args []string) bool {
-	allOps := fetchAndSortOperations()
+	allOps := fetchRegisteredOperations()
 	if len(allOps) == 0 {
 		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
 		ctx.Builder.WriteString("No operations are currently registered.\n")
@@ -199,7 +198,7 @@ func persistOperationResults(ctx *ShellContext, opName string, results []interna
 }
 
 func resolveRunTargets(ctx *ShellContext, args []string) []internal.RegisteredOperation {
-	allOps := fetchAndSortOperations()
+	allOps := fetchRegisteredOperations()
 	if len(allOps) == 0 {
 		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
 		ctx.Builder.WriteString("No operations are currently registered.\n")
@@ -324,17 +323,8 @@ func promptInteractiveTargetSelection(ctx *ShellContext, allOps []internal.Regis
 	return selected
 }
 
-func fetchAndSortOperations() []internal.RegisteredOperation {
-	ops := internal.FilterRegistry(func(op internal.RegisteredOperation) bool { return true })
-	sort.SliceStable(ops, func(i, j int) bool {
-		pathI := ops[i].ZonePath().Render(".")
-		pathJ := ops[j].ZonePath().Render(".")
-		if pathI == pathJ {
-			return ops[i].Name() < ops[j].Name()
-		}
-		return pathI < pathJ
-	})
-	return ops
+func fetchRegisteredOperations() []internal.RegisteredOperation {
+	return internal.FilterRegistry(func(op internal.RegisteredOperation) bool { return true })
 }
 
 func calculatePagination(totalOps int, args []string) (startIdx, endIdx, currentPage, totalPages int) {
