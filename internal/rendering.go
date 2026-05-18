@@ -322,7 +322,17 @@ func RenderStabilityRegression(renderer *Renderer, regression StabilityRegressio
 
 func renderTreeIllusion(b *strings.Builder, r *Renderer, scenarios []ScenarioRunResult) {
 	sort.SliceStable(scenarios, func(i, j int) bool {
-		return scenarios[i].ZonePath().Render(".") < scenarios[j].ZonePath().Render(".")
+		pathI := scenarios[i].ZonePath().Render(".")
+		pathJ := scenarios[j].ZonePath().Render(".")
+		if pathI != pathJ {
+			return pathI < pathJ
+		}
+		startI := scenarios[i].StartedAt()
+		startJ := scenarios[j].StartedAt()
+		if !startI.Equal(startJ) {
+			return startI.Before(startJ)
+		}
+		return scenarios[i].Name() < scenarios[j].Name()
 	})
 
 	var prevPath []string

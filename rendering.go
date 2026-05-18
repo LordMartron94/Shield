@@ -52,9 +52,9 @@ SHIELD_Rendering_FormatScenarioRunResults emits the text “SHIELD DEFENCE REPOR
 
 Otherwise it prints Context (homogeneous SystemIdentity or “<Mixed Batch>”), aggregate scenario timing summary, optional first-run
 
-stamp, then a zone breadcrumb tree sorted in-place by ZonePath.Render("."). renderer must be non-nil from RendererCreate.
+stamp, then a zone breadcrumb tree sorted in-place by ZonePath.Render(".") and StartedAt within each zone. renderer must be non-nil from RendererCreate.
 
-The input slice is reordered stable-sort by zone path; clone first if callers rely on original ordering.
+The input slice is reordered stable-sort by zone path then execution time; clone first if callers rely on original ordering.
 */
 func SHIELD_Rendering_FormatScenarioRunResults(
 	renderer *SHIELD_Rendering_Renderer,
