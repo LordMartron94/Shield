@@ -29,8 +29,10 @@ type ShieldPhysicalDirectory string
 type ShieldZoneMap map[ShieldZonePath]ShieldPhysicalDirectory
 
 type ShieldRuntime struct {
-	Transient         bool   `toml:"transient"`
-	MemoryDiagnostics string `toml:"memory_diagnostics"`
+	Transient          bool   `toml:"transient"`
+	MemoryDiagnostics  string `toml:"memory_diagnostics"`
+	MemoryTimeline     string `toml:"memory_timeline"`
+	MemoryTimelinePath string `toml:"memory_timeline_path"`
 }
 
 type ShieldConfiguration struct {
@@ -66,6 +68,12 @@ func loadShieldConfiguration(cfgPath string) (*ShieldConfiguration, error) {
 		return nil, fmt.Errorf("unknown color mode: '%s'", cfg.Environment.ColorMode)
 	}
 	if _, err := parseMemoryDiagnosticsMode(cfg.Runtime.MemoryDiagnostics); err != nil {
+		return nil, err
+	}
+	if _, err := parseMemoryTimelineMode(cfg.Runtime.MemoryTimeline); err != nil {
+		return nil, err
+	}
+	if err := validateMemoryTimelineConfig(cfg.Runtime.MemoryTimeline, cfg.Runtime.MemoryTimelinePath); err != nil {
 		return nil, err
 	}
 	return &cfg, nil

@@ -16,6 +16,8 @@ modules = [
 [runtime]
 transient = false  # Don't turn on; this disables test discovery and currently would mean no tests are registered.
 memory_diagnostics = "off" # off | always | leaks-only
+memory_timeline = "off" # off | render | export | both
+memory_timeline_path = ".shield/telemetry/memforge-timeline.jsonl" # required for export | both
 
 [zones]
 # Here you map ZonePaths (using . as separator) to their physical directories.
