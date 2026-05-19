@@ -2,8 +2,10 @@
 
 package runner
 
-func memoryTimelineCollect() MemoryTimelineResult {
-	return MemoryTimelineResult{
-		Provider: "memforge",
+import "memforge"
+
+func memoryTimelineCollect() memforge.MemforgeMemoryTimelineSnapshot {
+	return memforge.MemforgeMemoryTimelineSnapshot{
+		Available: false,
 	}
 }

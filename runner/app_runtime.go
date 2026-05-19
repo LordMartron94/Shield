@@ -29,10 +29,15 @@ type ShieldPhysicalDirectory string
 type ShieldZoneMap map[ShieldZonePath]ShieldPhysicalDirectory
 
 type ShieldRuntime struct {
-	Transient          bool   `toml:"transient"`
-	MemoryDiagnostics  string `toml:"memory_diagnostics"`
-	MemoryTimeline     string `toml:"memory_timeline"`
-	MemoryTimelinePath string `toml:"memory_timeline_path"`
+	Transient                 bool     `toml:"transient"`
+	MemoryDiagnostics         string   `toml:"memory_diagnostics"`
+	MemoryTimeline            string   `toml:"memory_timeline"`
+	MemoryTimelinePath        string   `toml:"memory_timeline_path"`
+	MemoryTimelineViews       []string `toml:"memory_timeline_views"`
+	MemoryStackIgnorePrefixes []string `toml:"memory_stack_ignore_prefixes"`
+	MemoryStackIgnoreContains []string `toml:"memory_stack_ignore_contains"`
+	MemoryStackMaxDepth       int      `toml:"memory_stack_max_depth"`
+	MemoryStackBoundaryMode   bool     `toml:"memory_stack_boundary_mode"`
 }
 
 type ShieldConfiguration struct {
@@ -74,6 +79,9 @@ func loadShieldConfiguration(cfgPath string) (*ShieldConfiguration, error) {
 		return nil, err
 	}
 	if err := validateMemoryTimelineConfig(cfg.Runtime.MemoryTimeline, cfg.Runtime.MemoryTimelinePath); err != nil {
+		return nil, err
+	}
+	if err := validateMemoryTimelineViews(cfg.Runtime.MemoryTimelineViews); err != nil {
 		return nil, err
 	}
 	return &cfg, nil

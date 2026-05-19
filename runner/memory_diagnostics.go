@@ -1,9 +1,9 @@
 package runner
 
 import (
-	"encoding/json"
 	"fmt"
 	"foundation/formatting"
+	"memforge"
 	"os"
 	"path/filepath"
 	"shield/internal"
@@ -85,26 +85,26 @@ func memoryDiagnosticsEnabled(cfg *ShieldConfiguration) bool {
 	return memoryDiagnosticsModeFromConfig(cfg) != MemoryDiagnosticsOff
 }
 
-func shouldRenderMemoryDiagnostics(mode MemoryDiagnosticsMode, result MemoryDiagnosticResult) bool {
+func shouldRenderMemoryDiagnostics(mode MemoryDiagnosticsMode, analysis memforge.MemforgeMemoryTimelineAnalysis) bool {
 	switch mode {
 	case MemoryDiagnosticsOff:
 		return false
 	case MemoryDiagnosticsLeaksOnly:
-		if !result.Available {
+		if !analysis.Available {
 			return false
 		}
-		return result.LeakDetected
+		return analysis.LeakDetected
 	default:
 		return true
 	}
 }
 
-func renderMemoryDiagnostics(renderer *internal.Renderer, builder *strings.Builder, result MemoryDiagnosticResult) {
+func renderMemoryDiagnostics(renderer *internal.Renderer, builder *strings.Builder, analysis memforge.MemforgeMemoryTimelineAnalysis) {
 	renderer.WriteColor(builder, internal.ColorHeader)
 	builder.WriteString("=== SHIELD MEMORY DIAGNOSTICS ===\n")
 	renderer.WriteColor(builder, internal.ColorReset)
 
-	if !result.Available {
+	if !analysis.Available {
 		renderer.WriteColor(builder, internal.ColorMuted)
 		builder.WriteString("Provider  : memforge (unavailable — rebuild with -tags memforge_debug)\n")
 		renderer.WriteColor(builder, internal.ColorReset)
@@ -113,17 +113,16 @@ func renderMemoryDiagnostics(renderer *internal.Renderer, builder *strings.Build
 	}
 
 	renderer.WriteColor(builder, internal.ColorMuted)
-	builder.WriteString(fmt.Sprintf("Provider  : %s\n", result.Provider))
-	builder.WriteString(fmt.Sprintf("Allocators: %d Total (%d Active, %d Destroyed, %d Types)\n",
-		result.AllocatorCount, result.ActiveAllocatorCount, result.DestroyedAllocatorCount, result.AllocatorTypeCount))
-	builder.WriteString(fmt.Sprintf("Activity  : %d Total Allocations, %s Total Bytes\n",
-		result.TotalAllocationCount, formatting.FormatMemoryBytes(result.TotalBytes)))
-	builder.WriteString(fmt.Sprintf("Live      : %d Allocations, %s, %d Allocators With Live Data\n",
-		result.LiveAllocationCount, formatting.FormatMemoryBytes(result.LiveBytes), result.AllocatorsWithLiveAllocs))
+	builder.WriteString("Provider  : memforge\n")
+	builder.WriteString(fmt.Sprintf("Events    : %d\n", analysis.TotalEvents))
+	builder.WriteString(fmt.Sprintf("Allocators: %d Total (%d Active, %d Destroyed)\n",
+		analysis.TotalAllocators, analysis.ActiveAllocators, analysis.DestroyedAllocators))
+	builder.WriteString(fmt.Sprintf("Live      : %d Allocations, %s, %d Leaking Arenas\n",
+		analysis.TotalLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalLiveBytes), analysis.LeakingAllocators))
 	renderer.WriteColor(builder, internal.ColorReset)
 
 	builder.WriteString("Verdict   : ")
-	if result.LeakDetected {
+	if analysis.LeakDetected {
 		renderer.WriteColor(builder, internal.ColorFail)
 		builder.WriteString("MEMORY LEAK DETECTED\n")
 	} else {
@@ -132,48 +131,10 @@ func renderMemoryDiagnostics(renderer *internal.Renderer, builder *strings.Build
 	}
 	renderer.WriteColor(builder, internal.ColorReset)
 
-	if result.LeakDetected {
-		renderLeakyAllocators(renderer, builder, result.Allocators)
+	if analysis.LeakDetected || analysis.TotalAllocators > 0 {
+		renderArenaSummary(renderer, builder, analysis.Arenas)
 	}
 	builder.WriteString("\n")
-}
-
-func renderLeakyAllocators(renderer *internal.Renderer, builder *strings.Builder, allocators []MemoryDiagnosticAllocatorResult) {
-	for _, allocator := range allocators {
-		if allocator.LiveAllocations == 0 {
-			continue
-		}
-
-		renderer.WriteColor(builder, internal.ColorFail)
-		builder.WriteString(fmt.Sprintf("  %s", allocator.Name))
-		renderer.WriteColor(builder, internal.ColorReset)
-		builder.WriteString(fmt.Sprintf(" [%s | addr=%s]\n", allocator.Status, formatMemoryDiagnosticAddress(allocator.Address)))
-
-		renderer.WriteColor(builder, internal.ColorMuted)
-		builder.WriteString(fmt.Sprintf("    Allocations: %d Total, %d Live | Bytes: %s Total, %s Live\n",
-			allocator.TotalAllocations,
-			allocator.LiveAllocations,
-			formatting.FormatMemoryBytes(allocator.TotalBytes),
-			formatting.FormatMemoryBytes(allocator.LiveBytes),
-		))
-		if strings.TrimSpace(allocator.Creator) != "" {
-			builder.WriteString(fmt.Sprintf("    Created By : %s\n", allocator.Creator))
-		}
-		renderer.WriteColor(builder, internal.ColorReset)
-
-		for _, allocation := range allocator.LiveAllocationDetails {
-			builder.WriteString(fmt.Sprintf("    - addr=%s size=%s age=%s\n",
-				formatMemoryDiagnosticAddress(allocation.Address),
-				formatting.FormatMemoryBytes(allocation.SizeBytes),
-				formatMemoryDiagnosticAge(allocation.CreatedAt),
-			))
-			if strings.TrimSpace(allocation.Creator) != "" {
-				renderer.WriteColor(builder, internal.ColorMuted)
-				builder.WriteString(fmt.Sprintf("      %s\n", allocation.Creator))
-				renderer.WriteColor(builder, internal.ColorReset)
-			}
-		}
-	}
 }
 
 func formatMemoryDiagnosticAddress(address uintptr) string {
@@ -196,12 +157,19 @@ func runPostExecutionMemoryDiagnostics(renderer *internal.Renderer, builder *str
 		return
 	}
 
-	result := memoryDiagnosticsCollect()
-	if !shouldRenderMemoryDiagnostics(mode, result) {
+	analysis := memoryTimelineAnalyzeFromConfig(cfg, memoryTimelineCollect(), "memory", "")
+	if !shouldRenderMemoryDiagnostics(mode, analysis) {
 		return
 	}
 
-	renderMemoryDiagnostics(renderer, builder, result)
+	renderMemoryDiagnostics(renderer, builder, analysis)
+}
+
+func memoryTimelineAnalyzeFromConfig(cfg *ShieldConfiguration, snapshot memforge.MemforgeMemoryTimelineSnapshot, sourceKind, sourcePath string) memforge.MemforgeMemoryTimelineAnalysis {
+	analysis := memforge.MemforgeMemoryTimelineAnalyze(snapshot, shieldStackFilterFromConfig(cfg))
+	analysis.SourceKind = sourceKind
+	analysis.SourcePath = sourcePath
+	return analysis
 }
 
 type MemoryTimelineMode string
@@ -212,35 +180,6 @@ const (
 	MemoryTimelineExport MemoryTimelineMode = "export"
 	MemoryTimelineBoth   MemoryTimelineMode = "both"
 )
-
-type MemoryTimelineFreedAllocation struct {
-	AllocationAddress string `json:"alloc_addr"`
-	SizeBytes         uint64 `json:"size_bytes"`
-	OriginalSeq       uint64 `json:"orig_seq"`
-	OriginalCreatedAt string `json:"orig_ts"`
-}
-
-type MemoryTimelineEvent struct {
-	Seq               uint64                          `json:"seq"`
-	Timestamp         string                          `json:"ts"`
-	Kind              string                          `json:"kind"`
-	AllocatorAddress  string                          `json:"allocator_addr"`
-	AllocatorName     string                          `json:"allocator_name"`
-	Stack             []string                        `json:"stack,omitempty"`
-	AllocationAddress string                          `json:"alloc_addr,omitempty"`
-	SizeBytes         uint64                          `json:"size_bytes,omitempty"`
-	OriginalSeq       uint64                          `json:"orig_seq,omitempty"`
-	OriginalCreatedAt string                          `json:"orig_ts,omitempty"`
-	Freed             []MemoryTimelineFreedAllocation `json:"freed,omitempty"`
-}
-
-type MemoryTimelineResult struct {
-	Available  bool
-	Provider   string
-	CapturedAt time.Time
-	EventCount int
-	Events     []MemoryTimelineEvent
-}
 
 func parseMemoryTimelineMode(raw string) (MemoryTimelineMode, error) {
 	trimmed := strings.TrimSpace(strings.ToLower(raw))
@@ -302,12 +241,14 @@ func runPostExecutionMemoryTimeline(renderer *internal.Renderer, builder *string
 		return
 	}
 
-	result := memoryTimelineCollect()
-	if !result.Available && (mode == MemoryTimelineRender || mode == MemoryTimelineBoth) {
+	snapshot := memoryTimelineCollect()
+	views := memoryTimelineViewsFromConfig(cfg)
+
+	if !snapshot.Available && (mode == MemoryTimelineRender || mode == MemoryTimelineBoth) {
 		renderMemoryTimelineUnavailable(renderer, builder)
 		return
 	}
-	if !result.Available && mode == MemoryTimelineExport {
+	if !snapshot.Available && mode == MemoryTimelineExport {
 		renderer.WriteColor(builder, internal.ColorFail)
 		builder.WriteString("Memory timeline export skipped: memforge debugger unavailable (rebuild with -tags memforge_debug)\n")
 		renderer.WriteColor(builder, internal.ColorReset)
@@ -316,9 +257,10 @@ func runPostExecutionMemoryTimeline(renderer *internal.Renderer, builder *string
 
 	switch mode {
 	case MemoryTimelineRender:
-		renderMemoryTimeline(renderer, builder, result)
+		analysis := memoryTimelineAnalyzeFromConfig(cfg, snapshot, "memory", "")
+		renderMemoryTimelineAnalysis(renderer, builder, analysis, views)
 	case MemoryTimelineExport:
-		if err := exportMemoryTimelineJSONL(configPath, cfg.Runtime.MemoryTimelinePath, result); err != nil {
+		if err := exportMemoryTimelineJSONL(configPath, cfg.Runtime.MemoryTimelinePath, snapshot); err != nil {
 			renderer.WriteColor(builder, internal.ColorFail)
 			builder.WriteString(fmt.Sprintf("Memory timeline export failed: %v\n", err))
 			renderer.WriteColor(builder, internal.ColorReset)
@@ -326,8 +268,9 @@ func runPostExecutionMemoryTimeline(renderer *internal.Renderer, builder *string
 		}
 		logMemoryTimelineExportPath(renderer, builder, configPath, cfg.Runtime.MemoryTimelinePath)
 	case MemoryTimelineBoth:
-		renderMemoryTimeline(renderer, builder, result)
-		if err := exportMemoryTimelineJSONL(configPath, cfg.Runtime.MemoryTimelinePath, result); err != nil {
+		analysis := memoryTimelineAnalyzeFromConfig(cfg, snapshot, "memory", "")
+		renderMemoryTimelineAnalysis(renderer, builder, analysis, views)
+		if err := exportMemoryTimelineJSONL(configPath, cfg.Runtime.MemoryTimelinePath, snapshot); err != nil {
 			renderer.WriteColor(builder, internal.ColorFail)
 			builder.WriteString(fmt.Sprintf("Memory timeline export failed: %v\n", err))
 			renderer.WriteColor(builder, internal.ColorReset)
@@ -347,12 +290,12 @@ func renderMemoryTimelineUnavailable(renderer *internal.Renderer, builder *strin
 	builder.WriteString("\n")
 }
 
-func renderMemoryTimeline(renderer *internal.Renderer, builder *strings.Builder, result MemoryTimelineResult) {
+func renderMemoryTimelineAnalysis(renderer *internal.Renderer, builder *strings.Builder, analysis memforge.MemforgeMemoryTimelineAnalysis, views []string) {
 	renderer.WriteColor(builder, internal.ColorHeader)
 	builder.WriteString("=== SHIELD MEMORY TIMELINE ===\n")
 	renderer.WriteColor(builder, internal.ColorReset)
 
-	if result.EventCount == 0 {
+	if analysis.TotalEvents == 0 {
 		renderer.WriteColor(builder, internal.ColorMuted)
 		builder.WriteString("No timeline events recorded.\n")
 		renderer.WriteColor(builder, internal.ColorReset)
@@ -360,39 +303,127 @@ func renderMemoryTimeline(renderer *internal.Renderer, builder *strings.Builder,
 		return
 	}
 
+	renderMemoryTimelineAnalysisHeader(renderer, builder, analysis)
+
+	if memoryTimelineViewsInclude(views, memoryTimelineViewSummary) {
+		renderArenaSummary(renderer, builder, analysis.Arenas)
+	}
+	if memoryTimelineViewsInclude(views, memoryTimelineViewLeaks) && analysis.TotalLiveAllocations > 0 {
+		renderLeakGroups(renderer, builder, analysis.LeakGroups)
+	}
+	if memoryTimelineViewsInclude(views, memoryTimelineViewTimeline) {
+		renderGranularTimeline(renderer, builder, analysis.Events)
+	}
+	builder.WriteString("\n")
+}
+
+func renderMemoryTimelineAnalysisHeader(renderer *internal.Renderer, builder *strings.Builder, analysis memforge.MemforgeMemoryTimelineAnalysis) {
 	kindCounts := make(map[string]int)
 	var firstTS, lastTS time.Time
-	for i, evt := range result.Events {
-		kindCounts[evt.Kind]++
-		if ts, err := time.Parse(time.RFC3339Nano, evt.Timestamp); err == nil {
-			if i == 0 || ts.Before(firstTS) {
-				firstTS = ts
-			}
-			if i == 0 || ts.After(lastTS) {
-				lastTS = ts
-			}
+	for i, evt := range analysis.Events {
+		kindCounts[string(evt.Kind)]++
+		if i == 0 || evt.Timestamp.Before(firstTS) {
+			firstTS = evt.Timestamp
+		}
+		if i == 0 || evt.Timestamp.After(lastTS) {
+			lastTS = evt.Timestamp
 		}
 	}
 
 	renderer.WriteColor(builder, internal.ColorMuted)
-	builder.WriteString(fmt.Sprintf("Provider  : %s\n", result.Provider))
-	builder.WriteString(fmt.Sprintf("Events    : %d\n", result.EventCount))
+	builder.WriteString(fmt.Sprintf("Source    : %s", analysis.SourceKind))
+	if analysis.SourcePath != "" {
+		builder.WriteString(fmt.Sprintf(" (%s)", analysis.SourcePath))
+	}
+	builder.WriteString("\n")
+	builder.WriteString(fmt.Sprintf("Events    : %d\n", analysis.TotalEvents))
 	if !firstTS.IsZero() && !lastTS.IsZero() {
 		builder.WriteString(fmt.Sprintf("Span      : %s to %s (%s)\n",
 			firstTS.Format("15:04:05.000"),
 			lastTS.Format("15:04:05.000"),
 			lastTS.Sub(firstTS).Round(time.Millisecond)))
 	}
+	builder.WriteString(fmt.Sprintf("Live      : %d allocations, %s\n",
+		analysis.TotalLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalLiveBytes)))
 	for _, kind := range sortedTimelineKinds(kindCounts) {
 		builder.WriteString(fmt.Sprintf("  %-28s %d\n", kind+":", kindCounts[kind]))
 	}
 	renderer.WriteColor(builder, internal.ColorReset)
 	builder.WriteString("\n")
+}
 
-	for _, evt := range result.Events {
-		renderMemoryTimelineEvent(renderer, builder, evt)
+func renderArenaSummary(renderer *internal.Renderer, builder *strings.Builder, arenas []memforge.MemforgeArenaSummary) {
+	renderer.WriteColor(builder, internal.ColorHighlight)
+	builder.WriteString("Arena Summary\n")
+	renderer.WriteColor(builder, internal.ColorReset)
+
+	if len(arenas) == 0 {
+		renderer.WriteColor(builder, internal.ColorMuted)
+		builder.WriteString("  (no allocators recorded)\n")
+		renderer.WriteColor(builder, internal.ColorReset)
+		return
+	}
+
+	for _, arena := range arenas {
+		statusColor := internal.ColorPass
+		statusLabel := "OK"
+		if arena.Leaking {
+			statusColor = internal.ColorFail
+			statusLabel = "LEAKING"
+		}
+		renderer.WriteColor(builder, statusColor)
+		builder.WriteString(fmt.Sprintf("  %-10s", statusLabel))
+		renderer.WriteColor(builder, internal.ColorReset)
+		builder.WriteString(fmt.Sprintf(" %-28s %s\n", arena.Name, formatMemoryDiagnosticAddress(arena.Address)))
+		renderer.WriteColor(builder, internal.ColorMuted)
+		age := arena.AgeAtCapture
+		if age == 0 && !arena.CreatedAt.IsZero() {
+			age = time.Since(arena.CreatedAt)
+		}
+		builder.WriteString(fmt.Sprintf("             age=%s live=%d/%s peak=%d/%s ever=%d/%s\n",
+			age.Round(time.Millisecond).String(),
+			arena.LiveAllocations, formatting.FormatMemoryBytes(arena.LiveBytes),
+			arena.PeakLiveAllocations, formatting.FormatMemoryBytes(arena.PeakLiveBytes),
+			arena.EverAllocations, formatting.FormatMemoryBytes(arena.EverBytes)))
+		if len(arena.FilteredCreatorStack) > 0 {
+			builder.WriteString("             created: ")
+			builder.WriteString(strings.Join(arena.FilteredCreatorStack, " → "))
+			builder.WriteString("\n")
+		}
+		renderer.WriteColor(builder, internal.ColorReset)
 	}
 	builder.WriteString("\n")
+}
+
+func renderLeakGroups(renderer *internal.Renderer, builder *strings.Builder, groups []memforge.MemforgeAllocationStackGroup) {
+	renderer.WriteColor(builder, internal.ColorHighlight)
+	builder.WriteString("Leak Groups (by filtered stack)\n")
+	renderer.WriteColor(builder, internal.ColorReset)
+
+	for _, group := range groups {
+		builder.WriteString(fmt.Sprintf("  %d alloc %s via %s\n",
+			group.AllocationCount,
+			formatting.FormatMemoryBytes(group.TotalBytes),
+			group.SampleAllocator))
+		if len(group.FilteredStack) > 0 {
+			renderer.WriteColor(builder, internal.ColorMuted)
+			builder.WriteString("    ")
+			builder.WriteString(strings.Join(group.FilteredStack, " → "))
+			builder.WriteString("\n")
+			renderer.WriteColor(builder, internal.ColorReset)
+		}
+	}
+	builder.WriteString("\n")
+}
+
+func renderGranularTimeline(renderer *internal.Renderer, builder *strings.Builder, events []memforge.MemforgeTimelineEvent) {
+	renderer.WriteColor(builder, internal.ColorHighlight)
+	builder.WriteString("Granular Timeline\n")
+	renderer.WriteColor(builder, internal.ColorReset)
+
+	for _, evt := range events {
+		renderGranularTimelineEvent(renderer, builder, evt)
+	}
 }
 
 func sortedTimelineKinds(counts map[string]int) []string {
@@ -410,35 +441,37 @@ func sortedTimelineKinds(counts map[string]int) []string {
 	return kinds
 }
 
-func renderMemoryTimelineEvent(renderer *internal.Renderer, builder *strings.Builder, evt MemoryTimelineEvent) {
+func renderGranularTimelineEvent(renderer *internal.Renderer, builder *strings.Builder, evt memforge.MemforgeTimelineEvent) {
 	renderer.WriteColor(builder, internal.ColorHighlight)
 	builder.WriteString(fmt.Sprintf("#%-6d ", evt.Seq))
 	renderer.WriteColor(builder, internal.ColorReset)
-	builder.WriteString(fmt.Sprintf("%s %-28s ", evt.Timestamp, evt.Kind))
-	builder.WriteString(fmt.Sprintf("%s (%s)\n", evt.AllocatorName, evt.AllocatorAddress))
+	builder.WriteString(fmt.Sprintf("%s %-28s ", evt.Timestamp.Format(time.RFC3339Nano), evt.Kind))
+	builder.WriteString(fmt.Sprintf("%s (%s)\n", evt.AllocatorName, formatMemoryDiagnosticAddress(evt.AllocatorAddress)))
 
 	switch evt.Kind {
-	case "allocation", "free_manual":
-		builder.WriteString(fmt.Sprintf("  addr=%s size=%s", evt.AllocationAddress, formatting.FormatMemoryBytes(evt.SizeBytes)))
-		if evt.Kind == "free_manual" {
-			builder.WriteString(fmt.Sprintf(" orig=#%d@%s", evt.OriginalSeq, evt.OriginalCreatedAt))
+	case memforge.MemforgeTimelineEventAllocation, memforge.MemforgeTimelineEventFreeManual:
+		builder.WriteString(fmt.Sprintf("  addr=%s size=%s",
+			formatMemoryDiagnosticAddress(evt.AllocationAddress),
+			formatting.FormatMemoryBytes(evt.SizeBytes)))
+		if evt.Kind == memforge.MemforgeTimelineEventFreeManual {
+			builder.WriteString(fmt.Sprintf(" orig=#%d@%s", evt.OriginalSeq, evt.OriginalCreatedAt.Format(time.RFC3339Nano)))
 		}
 		builder.WriteString("\n")
-	case "free_regional_reset", "free_regional_destroy":
-		builder.WriteString(fmt.Sprintf("  freed=%d allocation(s)\n", len(evt.Freed)))
-		for _, freed := range evt.Freed {
+	case memforge.MemforgeTimelineEventFreeRegionalReset, memforge.MemforgeTimelineEventFreeRegionalDestroy:
+		builder.WriteString(fmt.Sprintf("  freed=%d allocation(s)\n", len(evt.FreedAllocations)))
+		for _, freed := range evt.FreedAllocations {
 			builder.WriteString(fmt.Sprintf("    - %s %s orig=#%d@%s\n",
-				freed.AllocationAddress,
+				formatMemoryDiagnosticAddress(freed.AllocationAddress),
 				formatting.FormatMemoryBytes(freed.SizeBytes),
 				freed.OriginalSeq,
-				freed.OriginalCreatedAt))
+				freed.OriginalCreatedAt.Format(time.RFC3339Nano)))
 		}
 	}
 
-	if len(evt.Stack) > 0 {
+	if strings.TrimSpace(evt.Stack) != "" {
 		renderer.WriteColor(builder, internal.ColorMuted)
 		builder.WriteString("  ")
-		builder.WriteString(strings.Join(evt.Stack, " → "))
+		builder.WriteString(evt.Stack)
 		builder.WriteString("\n")
 		renderer.WriteColor(builder, internal.ColorReset)
 	}
@@ -454,7 +487,7 @@ func logMemoryTimelineExportPath(renderer *internal.Renderer, builder *strings.B
 	renderer.WriteColor(builder, internal.ColorReset)
 }
 
-func exportMemoryTimelineJSONL(configPath, configuredPath string, result MemoryTimelineResult) error {
+func exportMemoryTimelineJSONL(configPath, configuredPath string, snapshot memforge.MemforgeMemoryTimelineSnapshot) error {
 	resolved, err := resolveMemoryTimelinePath(configPath, configuredPath)
 	if err != nil {
 		return err
@@ -469,21 +502,66 @@ func exportMemoryTimelineJSONL(configPath, configuredPath string, result MemoryT
 	}
 	defer file.Close()
 
-	encoder := json.NewEncoder(file)
-	for _, evt := range result.Events {
-		if err := encoder.Encode(evt); err != nil {
-			return fmt.Errorf("failed to write timeline event: %w", err)
-		}
+	return memforge.MemforgeMemoryTimelineSnapshotWriteJSONL(file, snapshot)
+}
+
+func resolveMemoryTimelineUserPath(configPath, path string, fromConfig bool) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", fmt.Errorf("memory timeline path is empty")
+	}
+	if filepath.IsAbs(trimmed) {
+		return trimmed, nil
+	}
+	if fromConfig {
+		return resolveMemoryTimelinePath(configPath, trimmed)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve working directory: %w", err)
+	}
+	return filepath.Join(cwd, trimmed), nil
+}
+
+func runAnalyzeTimelineCommand(renderer *internal.Renderer, builder *strings.Builder, cfg *ShieldConfiguration, configPath string, args []string) bool {
+	fromConfig := len(args) == 0
+	path := strings.TrimSpace(cfg.Runtime.MemoryTimelinePath)
+	if len(args) > 0 {
+		path = strings.TrimSpace(args[0])
+	}
+	if path == "" {
+		renderer.WriteColor(builder, internal.ColorFail)
+		builder.WriteString("No timeline path provided and runtime.memory_timeline_path is empty.\n")
+		renderer.WriteColor(builder, internal.ColorReset)
+		return false
 	}
 
-	summary := map[string]any{
-		"type":        "summary",
-		"provider":    result.Provider,
-		"captured_at": result.CapturedAt.Format(time.RFC3339Nano),
-		"event_count": result.EventCount,
+	resolved, err := resolveMemoryTimelineUserPath(configPath, path, fromConfig)
+	if err != nil {
+		renderer.WriteColor(builder, internal.ColorFail)
+		builder.WriteString(fmt.Sprintf("Failed to resolve timeline path: %v\n", err))
+		renderer.WriteColor(builder, internal.ColorReset)
+		return false
 	}
-	if err := encoder.Encode(summary); err != nil {
-		return fmt.Errorf("failed to write timeline summary: %w", err)
+
+	file, err := os.Open(resolved)
+	if err != nil {
+		renderer.WriteColor(builder, internal.ColorFail)
+		builder.WriteString(fmt.Sprintf("Failed to open timeline file: %v\n", err))
+		renderer.WriteColor(builder, internal.ColorReset)
+		return false
 	}
-	return nil
+	defer file.Close()
+
+	snapshot, err := memforge.MemforgeMemoryTimelineSnapshotReadJSONL(file)
+	if err != nil {
+		renderer.WriteColor(builder, internal.ColorFail)
+		builder.WriteString(fmt.Sprintf("Failed to read timeline JSONL: %v\n", err))
+		renderer.WriteColor(builder, internal.ColorReset)
+		return false
+	}
+
+	analysis := memoryTimelineAnalyzeFromConfig(cfg, snapshot, "jsonl", resolved)
+	renderMemoryTimelineAnalysis(renderer, builder, analysis, memoryTimelineViewsFromConfig(cfg))
+	return false
 }

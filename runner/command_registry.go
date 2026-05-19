@@ -50,6 +50,9 @@ func init() {
 		{Order: 2, Names: []string{"list", "ls"}, Description: "Lists all registered operations. Usage: list [page]", Runner: runListCommand},
 		{Order: 3, Names: []string{"run", "r"}, Description: "Executes operations. Usage: run [zone_prefix | 'impacted'] (or no args for interactive)", Runner: runExecuteCommand},
 		{Order: 4, Names: []string{"results", "res"}, Description: "Lists persisted scenario results. Usage: results [page]", Runner: runResultsCommand},
+		{Order: 5, Names: []string{"analyze-timeline", "at"}, Description: "Analyzes an exported memforge timeline JSONL. Usage: analyze-timeline [path]", Runner: func(ctx *ShellContext, args []string) bool {
+			return runAnalyzeTimelineCommand(ctx.Renderer, ctx.Builder, ctx.Config, ctx.ConfigPath, args)
+		}},
 	}
 	extensions.SortedCopyShallow(CommandRegistry, func(a, b Command) int { return cmp.Compare(a.Order, b.Order) })
 	for i := range CommandRegistry {

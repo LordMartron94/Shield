@@ -18,6 +18,13 @@ transient = false  # Don't turn on; this disables test discovery and currently w
 memory_diagnostics = "off" # off | always | leaks-only
 memory_timeline = "off" # off | render | export | both
 memory_timeline_path = ".shield/telemetry/memforge-timeline.jsonl" # required for export | both
+memory_timeline_views = ["summary"] # summary (default) | leaks | timeline
+# Client-supplied stack filters (project policy, not memforge defaults):
+# memory_stack_ignore_prefixes = ["runner.", "internal.OperationRun"]
+memory_stack_ignore_prefixes = []
+memory_stack_ignore_contains = []
+memory_stack_max_depth = 0 # 0 = no cap after filtering
+memory_stack_boundary_mode = false # true = keep only first surviving frame
 
 [zones]
 # Here you map ZonePaths (using . as separator) to their physical directories.
