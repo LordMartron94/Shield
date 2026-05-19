@@ -21,7 +21,7 @@ func launchTransientShell(cfg *ShieldConfiguration, commandArgs []string) error 
 	}
 	workspaceRoot := resolveWorkspaceRoot(gitRoot)
 
-	_, transientBin, buildErr := buildTransientRunner(workspaceRoot, cfg.Discovery.Modules)
+	_, transientBin, buildErr := buildTransientRunner(workspaceRoot, cfg)
 	if buildErr != nil {
 		return fmt.Errorf("failed to build transient runner: %w", buildErr)
 	}
@@ -45,7 +45,8 @@ func launchTransientShell(cfg *ShieldConfiguration, commandArgs []string) error 
 	return nil
 }
 
-func buildTransientRunner(workspaceRoot string, discoveryModules []string) (string, string, error) {
+func buildTransientRunner(workspaceRoot string, cfg *ShieldConfiguration) (string, string, error) {
+	discoveryModules := cfg.Discovery.Modules
 	transientDir := filepath.Join(workspaceRoot, ".shield", "transient")
 	if err := os.MkdirAll(transientDir, 0755); err != nil {
 		return "", "", fmt.Errorf("failed creating transient directory: %w", err)
@@ -69,7 +70,12 @@ func buildTransientRunner(workspaceRoot string, discoveryModules []string) (stri
 	}
 
 	transientBinPath := filepath.Join(transientDir, "shield-transient")
-	buildCmd := exec.Command("go", "build", "-o", transientBinPath, transientCmdDir)
+	buildArgs := []string{"build", "-o", transientBinPath}
+	if memoryDiagnosticsEnabled(cfg) {
+		buildArgs = append(buildArgs, "-tags", "memforge_debug")
+	}
+	buildArgs = append(buildArgs, transientCmdDir)
+	buildCmd := exec.Command("go", buildArgs...)
 	buildCmd.Dir = workspaceRoot
 	output, err := buildCmd.CombinedOutput()
 	if err != nil {

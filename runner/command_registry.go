@@ -113,6 +113,7 @@ func runExecuteCommand(ctx *ShellContext, args []string) bool {
 	}
 	report := internal.RenderScenarios(ctx.Renderer, allResults)
 	ctx.Builder.WriteString(report)
+	runPostExecutionMemoryDiagnostics(ctx.Renderer, ctx.Builder, ctx.Config)
 	return false
 }
 

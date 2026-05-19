@@ -29,7 +29,8 @@ type ShieldPhysicalDirectory string
 type ShieldZoneMap map[ShieldZonePath]ShieldPhysicalDirectory
 
 type ShieldRuntime struct {
-	Transient bool `toml:"transient"`
+	Transient         bool   `toml:"transient"`
+	MemoryDiagnostics string `toml:"memory_diagnostics"`
 }
 
 type ShieldConfiguration struct {
@@ -63,6 +64,9 @@ func loadShieldConfiguration(cfgPath string) (*ShieldConfiguration, error) {
 
 	if _, valid := colorModeMap[cfg.Environment.ColorMode]; !valid {
 		return nil, fmt.Errorf("unknown color mode: '%s'", cfg.Environment.ColorMode)
+	}
+	if _, err := parseMemoryDiagnosticsMode(cfg.Runtime.MemoryDiagnostics); err != nil {
+		return nil, err
 	}
 	return &cfg, nil
 }
