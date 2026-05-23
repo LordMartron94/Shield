@@ -189,6 +189,75 @@ func SHIELD_Testing_ScenarioCreate[TInput, TOutput any](
 }
 
 /*
+SHIELD_Testing_ScenarioCreateWithGuardIsolation builds a scenario with per-guard subprocess isolation configured at creation time.
+*/
+func SHIELD_Testing_ScenarioCreateWithGuardIsolation[TInput, TOutput any](
+	name string,
+	description string,
+	guards []SHIELD_Testing_Guard[TInput, TOutput],
+	executor SHIELD_Testing_Executor[TInput, TOutput],
+	guardIsolation SHIELD_Testing_ScenarioGuardIsolation,
+) SHIELD_Testing_Scenario[TInput, TOutput] {
+	return internal.ScenarioCreateWithGuardIsolation(name, description, guards, executor, guardIsolation)
+}
+
+/*
+SHIELD_Testing_ScenarioGuardIsolation configures which guards run in a subprocess (see internal.ScenarioGuardIsolation).
+*/
+type SHIELD_Testing_ScenarioGuardIsolation = internal.ScenarioGuardIsolation
+
+/*
+SHIELD_Testing_ScenarioGuardIsolationAllGuards marks every guard in the scenario for subprocess isolation.
+*/
+func SHIELD_Testing_ScenarioGuardIsolationAllGuards() SHIELD_Testing_ScenarioGuardIsolation {
+	return internal.ScenarioGuardIsolationAllGuards()
+}
+
+/*
+SHIELD_Testing_ScenarioGuardIsolationPerGuard marks only the named guards for subprocess isolation.
+*/
+func SHIELD_Testing_ScenarioGuardIsolationPerGuard(perGuard map[string]bool) SHIELD_Testing_ScenarioGuardIsolation {
+	return internal.ScenarioGuardIsolationPerGuard(perGuard)
+}
+
+/*
+SHIELD_Testing_ScenarioGuardIsolationAllGuardsSet configures subprocess isolation for all guards on scenario.
+*/
+func SHIELD_Testing_ScenarioGuardIsolationAllGuardsSet[TInput, TOutput any](
+	scenario SHIELD_Testing_Scenario[TInput, TOutput],
+	enabled bool,
+) SHIELD_Testing_Scenario[TInput, TOutput] {
+	return internal.ScenarioGuardIsolationAllGuardsSet(scenario, enabled)
+}
+
+/*
+SHIELD_Testing_ScenarioGuardIsolationPerGuardSet configures subprocess isolation for specific guards on scenario.
+*/
+func SHIELD_Testing_ScenarioGuardIsolationPerGuardSet[TInput, TOutput any](
+	scenario SHIELD_Testing_Scenario[TInput, TOutput],
+	perGuard map[string]bool,
+) SHIELD_Testing_Scenario[TInput, TOutput] {
+	return internal.ScenarioGuardIsolationPerGuardSet(scenario, perGuard)
+}
+
+/*
+SHIELD_Testing_OperationStateCodec serializes operation state across subprocess guard boundaries.
+*/
+type SHIELD_Testing_OperationStateCodec[TState any] = internal.OperationStateCodec[TState]
+
+/*
+SHIELD_Testing_GuardFailureClass classifies guard failures (policy, panic, critical subprocess crash, framework).
+*/
+type SHIELD_Testing_GuardFailureClass = internal.GuardFailureClass
+
+const (
+	SHIELD_Testing_GuardFailureClassPolicy    = internal.GuardFailureClassPolicy
+	SHIELD_Testing_GuardFailureClassPanic     = internal.GuardFailureClassPanic
+	SHIELD_Testing_GuardFailureClassCritical  = internal.GuardFailureClassCritical
+	SHIELD_Testing_GuardFailureClassFramework = internal.GuardFailureClassFramework
+)
+
+/*
 SHIELD_Testing_OperationRunScenario executes a scenario inside an operation callback using the callback's execution context.
 */
 func SHIELD_Testing_OperationRunScenario[TInput, TOutput any](
@@ -236,10 +305,11 @@ func SHIELD_Testing_OperationCreate[TState any](
 	startup func() (TState, error),
 	teardown func(state TState),
 	runScenarios func(state TState, execCtx SHIELD_Testing_ExecutionContext) []SHIELD_Testing_ScenarioRunResult,
+	stateCodec *SHIELD_Testing_OperationStateCodec[TState],
 	zones ...string,
 ) SHIELD_Testing_Operation[TState] {
 	zonePath := SHIELD_Testing_ZonePathCreate(zones...)
-	return internal.OperationCreate(name, description, zonePath, startup, teardown, runScenarios)
+	return internal.OperationCreate(name, description, zonePath, startup, teardown, runScenarios, stateCodec)
 }
 
 /*
@@ -261,6 +331,7 @@ func SHIELD_Testing_OperationCreateStateless(
 		},
 		func(_ struct{}) {},
 		runScenarios,
+		nil,
 	)
 }
 

@@ -346,6 +346,9 @@ type SystemIdentity struct {
 type ExecutionContext struct {
 	Identity SystemIdentity
 	ZonePath ZonePath
+
+	Runtime             *TestingRuntimeContext
+	IsolatedGuardTarget *IsolatedGuardTarget
 }
 
 type Executor[TInput, TOutput any] func(input TInput) (output TOutput, error error)
@@ -357,6 +360,8 @@ type Scenario[TInput, TOutput any] struct {
 	guards []Guard[TInput, TOutput]
 
 	executor Executor[TInput, TOutput]
+
+	guardIsolation ScenarioGuardIsolation
 }
 
 func ScenarioCreate[TInput, TOutput any](
@@ -373,6 +378,30 @@ func ScenarioCreate[TInput, TOutput any](
 	}
 }
 
+/*
+ScenarioCreateWithGuardIsolation builds a scenario and applies guard subprocess isolation at creation time.
+*/
+func ScenarioCreateWithGuardIsolation[TInput, TOutput any](
+	name string,
+	description string,
+	guards []Guard[TInput, TOutput],
+	executor Executor[TInput, TOutput],
+	guardIsolation ScenarioGuardIsolation,
+) Scenario[TInput, TOutput] {
+	scenario := ScenarioCreate(name, description, guards, executor)
+	scenario.guardIsolation = guardIsolation
+	return scenario
+}
+
+type GuardFailureClass string
+
+const (
+	GuardFailureClassPolicy    GuardFailureClass = "policy"
+	GuardFailureClassPanic     GuardFailureClass = "panic"
+	GuardFailureClassCritical  GuardFailureClass = "critical"
+	GuardFailureClassFramework GuardFailureClass = "framework"
+)
+
 type GuardEvaluationResult struct {
 	guardName string
 	passed    bool
@@ -381,6 +410,7 @@ type GuardEvaluationResult struct {
 	failedSeed      essence.UUID
 	failedIteration uint64
 	failureReason   string
+	failureClass    GuardFailureClass
 }
 
 /*
@@ -411,7 +441,18 @@ func (g *GuardEvaluationResult) FailureReason() string {
 	if g.passed {
 		return ""
 	}
-	return fmt.Sprintf("Failed at Seed %s, Iteration %d: %s", g.failedSeed.String(), g.failedIteration, g.failureReason)
+	prefix := ""
+	if g.failureClass == GuardFailureClassCritical {
+		prefix = "CRITICAL: "
+	}
+	return fmt.Sprintf("Failed at Seed %s, Iteration %d: %s%s", g.failedSeed.String(), g.failedIteration, prefix, g.failureReason)
+}
+
+/*
+FailureClass returns how the guard failed (policy, panic, critical subprocess crash, framework).
+*/
+func (g *GuardEvaluationResult) FailureClass() GuardFailureClass {
+	return g.failureClass
 }
 
 type ScenarioRunResult struct {
@@ -551,6 +592,9 @@ func ScenarioRun[TInput, TOutput any](
 	if config.SeedOverride != nil {
 		seed = *config.SeedOverride
 	}
+	if execCtx.Runtime != nil && execCtx.Runtime.ScenarioSeedOverride != nil {
+		seed = *execCtx.Runtime.ScenarioSeedOverride
+	}
 
 	var entropyProvider *entropy.EntropyProvider
 	var entropyProviderID string
@@ -588,8 +632,42 @@ func ScenarioRun[TInput, TOutput any](
 	start := time.Now()
 	var summedDuration time.Duration
 
+	if target := execCtx.IsolatedGuardTarget; target != nil {
+		if target.ScenarioName != scenario.name {
+			result.passed = true
+			result.guardResults = []GuardEvaluationResult{}
+			result.totalDurationWall = time.Since(start)
+			result.startedAt = start
+			return result
+		}
+		for _, guard := range scenario.guards {
+			if guard.name != target.GuardName {
+				continue
+			}
+			guardResult := evaluateGuard(guard, scenario, scenario.executor, seed, config, entropyProvider, execCtx)
+			result.guardResults = []GuardEvaluationResult{guardResult}
+			if !guardResult.passed {
+				result.passed = false
+			}
+			result.totalDurationWall = time.Since(start)
+			result.totalDurationSummed = guardResult.duration
+			result.startedAt = start
+			return result
+		}
+		result.passed = false
+		result.guardResults = []GuardEvaluationResult{{
+			guardName:     target.GuardName,
+			passed:        false,
+			failureClass:  GuardFailureClassFramework,
+			failureReason: fmt.Sprintf("guard %q not found in scenario %q", target.GuardName, scenario.name),
+		}}
+		result.totalDurationWall = time.Since(start)
+		result.startedAt = start
+		return result
+	}
+
 	for i, guard := range scenario.guards {
-		guardResult := evaluateGuard(guard, scenario.executor, seed, config, entropyProvider)
+		guardResult := evaluateGuard(guard, scenario, scenario.executor, seed, config, entropyProvider, execCtx)
 		result.guardResults[i] = guardResult
 
 		if !guardResult.passed {
@@ -695,6 +773,8 @@ type Operation[TState any] struct {
 	teardown func(state TState)
 
 	runScenarios func(state TState, execCtx ExecutionContext) []ScenarioRunResult
+
+	stateCodec *OperationStateCodec[TState]
 }
 
 func OperationCreate[TState any](
@@ -704,6 +784,7 @@ func OperationCreate[TState any](
 	startup func() (TState, error),
 	teardown func(state TState),
 	runScenarios func(state TState, execCtx ExecutionContext) []ScenarioRunResult,
+	stateCodec *OperationStateCodec[TState],
 ) Operation[TState] {
 	return Operation[TState]{
 		name:         name,
@@ -712,6 +793,7 @@ func OperationCreate[TState any](
 		startup:      startup,
 		teardown:     teardown,
 		runScenarios: runScenarios,
+		stateCodec:   stateCodec,
 	}
 }
 
@@ -795,9 +877,22 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 	var scenariosPanicked bool
 	var scenariosPanicMsg string
 
+	var operationSnapshot []byte
 	enrichedCtx := ExecutionContext{
 		Identity: execCtx.Identity,
 		ZonePath: operation.zonePath,
+		Runtime:  execCtx.Runtime,
+	}
+	if execCtx.Runtime != nil {
+		runtimeCopy := *execCtx.Runtime
+		runtimeCopy.OperationName = operation.name
+		runtimeCopy.OperationStateSnapshot = &operationSnapshot
+		if operation.stateCodec != nil {
+			runtimeCopy.SerializeOperationState = func() ([]byte, error) {
+				return operation.stateCodec.Serialize(state)
+			}
+		}
+		enrichedCtx.Runtime = &runtimeCopy
 	}
 
 	func() {
@@ -809,6 +904,13 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 		}()
 		scenarioResults = operation.runScenarios(state, enrichedCtx)
 	}()
+
+	if len(operationSnapshot) > 0 && operation.stateCodec != nil {
+		deserialized, deserializeErr := operation.stateCodec.Deserialize(operationSnapshot)
+		if deserializeErr == nil {
+			state = deserialized
+		}
+	}
 
 	if scenariosPanicked {
 		result.passed = false
@@ -841,18 +943,26 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 
 func evaluateGuard[TInput, TOutput any](
 	guard Guard[TInput, TOutput],
+	scenario Scenario[TInput, TOutput],
 	executor Executor[TInput, TOutput],
 	seed essence.UUID,
 	config ScenarioRunConfig,
 	provider *entropy.EntropyProvider,
+	execCtx ExecutionContext,
 ) GuardEvaluationResult {
 	if guard.isPoisoned {
 		return GuardEvaluationResult{
 			guardName:     guard.name,
 			passed:        false,
+			failureClass:  GuardFailureClassFramework,
 			failureReason: fmt.Sprintf("FRAMEWORK ERROR: %s", guard.poisonReason),
 			duration:      0,
 		}
+	}
+
+	if ScenarioGuardIsolationEnabled(scenario.guardIsolation, guard.name) &&
+		!isolatedGuardChildProcessActive() {
+		return evaluateGuardSubprocess(guard, scenario, executor, seed, config, provider, execCtx)
 	}
 
 	result := GuardEvaluationResult{
@@ -878,6 +988,11 @@ func evaluateGuard[TInput, TOutput any](
 			result.failedSeed = seed
 			result.failedIteration = i
 			result.failureReason = reason
+			if execRes.panicked {
+				result.failureClass = GuardFailureClassPanic
+			} else {
+				result.failureClass = GuardFailureClassPolicy
+			}
 			break
 		}
 	}

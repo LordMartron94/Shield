@@ -102,7 +102,14 @@ func runExecuteCommand(ctx *ShellContext, args []string) bool {
 			absPhysicalDir = filepath.ToSlash(filepath.Join(ctx.GitRoot, physicalDir))
 		}
 		identity, isDirty := resolveOperationIdentity(ctx, absPhysicalDir)
-		execCtx := internal.ExecutionContext{Identity: identity}
+		workspaceRoot := resolveWorkspaceRoot(ctx.GitRoot)
+		execCtx := internal.ExecutionContext{
+			Identity: identity,
+			Runtime: &internal.TestingRuntimeContext{
+				ConfigurationPath:   ctx.ConfigPath,
+				TransientBinaryPath: internal.IsolatedGuardSubprocessResolveBinaryPath(workspaceRoot),
+			},
+		}
 		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorMuted)
 		ctx.Builder.WriteString(fmt.Sprintf("Running %s [Identity: %s | Path: %s]...\n", op.Name(), identity.Version, physicalDir))
 		ctx.Renderer.WriteColor(ctx.Builder, internal.ColorReset)

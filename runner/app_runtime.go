@@ -219,6 +219,9 @@ func RunShieldEntrypoint(cfgPath string, commandArgs []string) error {
 	defer shield.SHIELD_Testing_Storage_EngineClose(storage)
 
 	renderer := internal.RendererCreate(internal.RenderingConfigurationCreate(modeEnum))
+	if len(commandArgs) > 0 && commandArgs[0] == "run-isolated-guard" {
+		return runIsolatedGuardCommand(commandArgs[1:])
+	}
 	if len(commandArgs) > 0 {
 		return RunSingleCommand(cfg, storage, renderer, strings.Join(commandArgs, " "), cfgPath)
 	}

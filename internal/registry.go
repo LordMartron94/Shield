@@ -9,10 +9,14 @@ import (
 // ----------------------------------------------------------- TYPES
 
 type RegisteredOperation struct {
-	name        string
-	description string
-	zonePath    ZonePath
-	runner      func(execCtx ExecutionContext) OperationRunResult
+	name         string
+	description  string
+	zonePath     ZonePath
+	runner       func(execCtx ExecutionContext) OperationRunResult
+	startup      func() (any, error)
+	teardown     func(state any)
+	runScenarios func(state any, execCtx ExecutionContext) []ScenarioRunResult
+	stateCodec   operationStateCodecBox
 }
 
 /*
@@ -51,6 +55,9 @@ var operationRegistry = []RegisteredOperation{}
 
 func OperationRegister[TState any](operation Operation[TState]) {
 	registryLock.Lock()
+	defer registryLock.Unlock()
+
+	stateCodec := operationStateCodecBoxFrom(operation.stateCodec)
 
 	operationRegistry = append(operationRegistry, RegisteredOperation{
 		name:        operation.name,
@@ -59,9 +66,28 @@ func OperationRegister[TState any](operation Operation[TState]) {
 		runner: func(execCtx ExecutionContext) OperationRunResult {
 			return OperationRun(&operation, execCtx)
 		},
+		startup: func() (any, error) {
+			return operation.startup()
+		},
+		teardown: func(state any) {
+			operation.teardown(state.(TState))
+		},
+		runScenarios: func(state any, execCtx ExecutionContext) []ScenarioRunResult {
+			return operation.runScenarios(state.(TState), execCtx)
+		},
+		stateCodec: stateCodec,
 	})
+}
 
-	registryLock.Unlock()
+func registeredOperationFindByName(name string) (RegisteredOperation, bool) {
+	registryLock.Lock()
+	defer registryLock.Unlock()
+	for _, registered := range operationRegistry {
+		if registered.name == name {
+			return registered, true
+		}
+	}
+	return RegisteredOperation{}, false
 }
 
 // ----------------------------------------------------------- FILTERING

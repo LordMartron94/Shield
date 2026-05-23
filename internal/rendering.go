@@ -386,6 +386,9 @@ func renderTreeIllusion(b *strings.Builder, r *Renderer, scenarios []ScenarioRun
 					b.WriteString(scenarioIndent)
 					b.WriteString("  - ")
 					r.WriteColor(b, ColorFail)
+					if g.FailureClass() == GuardFailureClassCritical {
+						b.WriteString("CRITICAL ")
+					}
 					b.WriteString(g.Name())
 					r.WriteColor(b, ColorReset)
 					b.WriteString(": ")
