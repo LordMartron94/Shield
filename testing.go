@@ -71,7 +71,7 @@ func SHIELD_Testing_ZonePathCreateFromString(path string, separator string) SHIE
 }
 
 /*
-SHIELD_Testing_GuardPolicyMustNotPanic traps unexpected panics as guard failures with recovered diagnostics.
+SHIELD_Testing_GuardPolicyMustNotPanic traps unexpected panics as guard failures with the panic value and stack trace.
 */
 func SHIELD_Testing_GuardPolicyMustNotPanic[TOutput any]() SHIELD_Testing_GuardPolicy[TOutput] {
 	return internal.GuardPolicyMustNotPanic[TOutput]()

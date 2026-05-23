@@ -6,11 +6,21 @@ import (
 	"foundation"
 	"foundation/entropy"
 	"foundation/formatting"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 )
+
+/*
+shieldTestingRecoveredPanicFormat turns a recovered panic value into a diagnostic string with stack trace.
+
+Called from defer recover() handlers so debug.Stack reflects the panicking goroutine.
+*/
+func shieldTestingRecoveredPanicFormat(recovered any) string {
+	return fmt.Sprintf("%v\n\n%s", recovered, string(debug.Stack()))
+}
 
 // --------------------------------------------------------------- GUARD POLICY
 
@@ -45,7 +55,7 @@ func GuardPolicyMustNotPanic[TOutput any]() GuardPolicy[TOutput] {
 		flags: FlagExpectsNoPanic,
 		evaluate: func(result executionResult[TOutput]) (passed bool, reason string) {
 			if result.panicked {
-				return false, fmt.Sprintf("unexpected panic occurred: %s", result.panicMessage)
+				return false, fmt.Sprintf("unexpected panic occurred:\n%s", result.panicMessage)
 			}
 
 			return true, ""
@@ -742,7 +752,7 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 		defer func() {
 			if r := recover(); r != nil {
 				startupPanicked = true
-				startupPanicMsg = fmt.Sprintf("%v", r)
+				startupPanicMsg = shieldTestingRecoveredPanicFormat(r)
 			}
 		}()
 		state, startupErr = operation.startup()
@@ -750,7 +760,7 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 
 	if startupPanicked {
 		result.scenarioResults = []ScenarioRunResult{
-			createSyntheticScenario("Operation_Startup_Failure", "startup_execution", fmt.Sprintf("startup panicked: %s", startupPanicMsg)),
+			createSyntheticScenario("Operation_Startup_Failure", "startup_execution", fmt.Sprintf("startup panicked:\n%s", startupPanicMsg)),
 		}
 		result.totalDurationWall = time.Since(start)
 		return result
@@ -769,7 +779,11 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 		defer func() {
 			if r := recover(); r != nil {
 				result.passed = false
-				teardownFail := createSyntheticScenario("Operation_Teardown_Failure", "teardown_execution", fmt.Sprintf("teardown panicked: %v", r))
+				teardownFail := createSyntheticScenario(
+					"Operation_Teardown_Failure",
+					"teardown_execution",
+					fmt.Sprintf("teardown panicked:\n%s", shieldTestingRecoveredPanicFormat(r)),
+				)
 				result.scenarioResults = append(result.scenarioResults, teardownFail)
 			}
 		}()
@@ -790,7 +804,7 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 		defer func() {
 			if r := recover(); r != nil {
 				scenariosPanicked = true
-				scenariosPanicMsg = fmt.Sprintf("%v", r)
+				scenariosPanicMsg = shieldTestingRecoveredPanicFormat(r)
 			}
 		}()
 		scenarioResults = operation.runScenarios(state, enrichedCtx)
@@ -799,7 +813,7 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 	if scenariosPanicked {
 		result.passed = false
 		result.scenarioResults = []ScenarioRunResult{
-			createSyntheticScenario("Operation_Execution_Failure", "runScenarios_execution", fmt.Sprintf("runScenarios panicked: %s", scenariosPanicMsg)),
+			createSyntheticScenario("Operation_Execution_Failure", "runScenarios_execution", fmt.Sprintf("runScenarios panicked:\n%s", scenariosPanicMsg)),
 		}
 		result.totalDurationWall = time.Since(start)
 		return result
@@ -886,7 +900,7 @@ func executeSingleIteration[TInput, TOutput any](
 	defer func() {
 		if r := recover(); r != nil {
 			res.panicked = true
-			res.panicMessage = fmt.Sprintf("%v", r)
+			res.panicMessage = shieldTestingRecoveredPanicFormat(r)
 		}
 	}()
 
