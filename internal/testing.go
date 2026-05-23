@@ -797,6 +797,13 @@ func OperationCreate[TState any](
 	}
 }
 
+func operationTeardownState[TState any](operation *Operation[TState], state TState) {
+	if operation == nil || operation.teardown == nil {
+		return
+	}
+	operation.teardown(state)
+}
+
 func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionContext) (result OperationRunResult) {
 	start := time.Now()
 
@@ -906,9 +913,28 @@ func OperationRun[TState any](operation *Operation[TState], execCtx ExecutionCon
 	}()
 
 	if len(operationSnapshot) > 0 && operation.stateCodec != nil {
-		deserialized, deserializeErr := operation.stateCodec.Deserialize(operationSnapshot)
-		if deserializeErr == nil {
-			state = deserialized
+		if operation.stateCodec.Apply != nil {
+			if applyErr := operation.stateCodec.Apply(state, operationSnapshot); applyErr != nil {
+				result.passed = false
+				scenarioResults = append(scenarioResults, createSyntheticScenario(
+					"Operation_State_Apply_Failure",
+					"operation_state_apply",
+					fmt.Sprintf("apply operation state snapshot: %v", applyErr),
+				))
+			}
+		} else {
+			deserialized, deserializeErr := operation.stateCodec.Deserialize(operationSnapshot)
+			if deserializeErr != nil {
+				result.passed = false
+				scenarioResults = append(scenarioResults, createSyntheticScenario(
+					"Operation_State_Deserialize_Failure",
+					"operation_state_deserialize",
+					fmt.Sprintf("deserialize operation state snapshot: %v", deserializeErr),
+				))
+			} else {
+				operationTeardownState(operation, state)
+				state = deserialized
+			}
 		}
 	}
 

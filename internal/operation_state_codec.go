@@ -13,6 +13,10 @@ Snapshots must contain only process-portable logical fields (versioned JSON reco
 type OperationStateCodec[TState any] struct {
 	Serialize   func(state TState) ([]byte, error)
 	Deserialize func(snapshot []byte) (TState, error)
+	// Apply merges a portable snapshot into live operation state after scenarios finish.
+	// Use for fields that survive subprocess round-trips (flags, counters). Deserialize
+	// remains for cold-start in isolated child processes.
+	Apply func(state TState, snapshot []byte) error
 }
 
 type operationStateCodecBox struct {

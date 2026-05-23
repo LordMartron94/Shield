@@ -242,6 +242,9 @@ func SHIELD_Testing_ScenarioGuardIsolationPerGuardSet[TInput, TOutput any](
 
 /*
 SHIELD_Testing_OperationStateCodec serializes operation state across subprocess guard boundaries.
+
+Deserialize builds cold state in isolated child processes. Apply merges portable snapshot fields into
+live operation state after scenarios finish without discarding in-process resources.
 */
 type SHIELD_Testing_OperationStateCodec[TState any] = internal.OperationStateCodec[TState]
 
