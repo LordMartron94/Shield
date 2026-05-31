@@ -119,6 +119,10 @@ func renderMemoryDiagnostics(renderer *internal.Renderer, builder *strings.Build
 		analysis.TotalAllocators, analysis.ActiveAllocators, analysis.DestroyedAllocators))
 	builder.WriteString(fmt.Sprintf("Live      : %d Allocations, %s, %d Leaking Arenas\n",
 		analysis.TotalLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalLiveBytes), analysis.LeakingAllocators))
+	builder.WriteString(fmt.Sprintf("Peak      : %d Allocations, %s\n",
+		analysis.TotalPeakLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalPeakLiveBytes)))
+	builder.WriteString(fmt.Sprintf("Ever      : %d Allocations, %s\n",
+		analysis.TotalEverAllocations, formatting.FormatMemoryBytes(analysis.TotalEverBytes)))
 	renderer.WriteColor(builder, internal.ColorReset)
 
 	builder.WriteString("Verdict   : ")
@@ -345,6 +349,10 @@ func renderMemoryTimelineAnalysisHeader(renderer *internal.Renderer, builder *st
 	}
 	builder.WriteString(fmt.Sprintf("Live      : %d allocations, %s\n",
 		analysis.TotalLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalLiveBytes)))
+	builder.WriteString(fmt.Sprintf("Peak      : %d allocations, %s\n",
+		analysis.TotalPeakLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalPeakLiveBytes)))
+	builder.WriteString(fmt.Sprintf("Ever      : %d allocations, %s\n",
+		analysis.TotalEverAllocations, formatting.FormatMemoryBytes(analysis.TotalEverBytes)))
 	for _, kind := range sortedTimelineKinds(kindCounts) {
 		builder.WriteString(fmt.Sprintf("  %-28s %d\n", kind+":", kindCounts[kind]))
 	}
@@ -385,6 +393,37 @@ func renderArenaSummary(renderer *internal.Renderer, builder *strings.Builder, a
 			arena.LiveAllocations, formatting.FormatMemoryBytes(arena.LiveBytes),
 			arena.PeakLiveAllocations, formatting.FormatMemoryBytes(arena.PeakLiveBytes),
 			arena.EverAllocations, formatting.FormatMemoryBytes(arena.EverBytes)))
+		if arena.CurrentArenaDataCapBytes > 0 {
+			arenaLine := fmt.Sprintf("             arena=%s", formatting.FormatMemoryBytes(arena.CurrentArenaDataCapBytes))
+			if arena.CurrentArenaTotalBytes > 0 {
+				arenaLine += fmt.Sprintf(" mmap=%s", formatting.FormatMemoryBytes(arena.CurrentArenaTotalBytes))
+			}
+			if arena.PeakArenaDataCapBytes > arena.CurrentArenaDataCapBytes {
+				arenaLine += fmt.Sprintf(" peak=%s", formatting.FormatMemoryBytes(arena.PeakArenaDataCapBytes))
+			}
+			if arena.LiveBytes > 0 {
+				utilPct := float64(arena.LiveBytes) * 100 / float64(arena.CurrentArenaDataCapBytes)
+				arenaLine += fmt.Sprintf(" util=%.1f%%", utilPct)
+			}
+			builder.WriteString(arenaLine + "\n")
+		}
+		if len(arena.CapacitySegments) > 1 {
+			for _, segment := range arena.CapacitySegments {
+				endLabel := "capture"
+				if !segment.EndedAt.IsZero() {
+					endLabel = segment.EndedAt.Format("15:04:05.000")
+				}
+				segmentLine := fmt.Sprintf("             %s – %s  %s",
+					segment.StartedAt.Format("15:04:05.000"),
+					endLabel,
+					formatting.FormatMemoryBytes(segment.DataCapBytes))
+				if segment.GrownFromBytes > 0 && segment.DataCapBytes > segment.GrownFromBytes {
+					segmentLine += fmt.Sprintf(" (+%s)",
+						formatting.FormatMemoryBytes(segment.DataCapBytes-segment.GrownFromBytes))
+				}
+				builder.WriteString(segmentLine + "\n")
+			}
+		}
 		if len(arena.FilteredCreatorStack) > 0 {
 			builder.WriteString("             created: ")
 			builder.WriteString(strings.Join(arena.FilteredCreatorStack, " → "))
