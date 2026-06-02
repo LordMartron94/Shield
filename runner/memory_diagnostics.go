@@ -1,3 +1,5 @@
+// Package runner executes shield targets. Memory diagnostics use the memforge_debug build tag;
+// Vulkan per-frame telemetry in gpuarch uses the separate gpuarch_diagnostics tag (orthogonal).
 package runner
 
 import (
@@ -123,6 +125,17 @@ func renderMemoryDiagnostics(renderer *internal.Renderer, builder *strings.Build
 		analysis.TotalPeakLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalPeakLiveBytes)))
 	builder.WriteString(fmt.Sprintf("Ever      : %d Allocations, %s\n",
 		analysis.TotalEverAllocations, formatting.FormatMemoryBytes(analysis.TotalEverBytes)))
+	if analysis.TotalArenaDataCapBytes > 0 {
+		builder.WriteString(fmt.Sprintf("Arena cap : %s", formatting.FormatMemoryBytes(analysis.TotalArenaDataCapBytes)))
+		if analysis.TotalArenaMmapBytes > 0 {
+			builder.WriteString(fmt.Sprintf("  mmap %s", formatting.FormatMemoryBytes(analysis.TotalArenaMmapBytes)))
+		}
+		builder.WriteString("\n")
+		builder.WriteString(fmt.Sprintf("Util      : live %.1f%%  peak %.1f%%  ever %.1f%%\n",
+			analysis.LiveUtilizationPercent,
+			analysis.PeakUtilizationPercent,
+			analysis.EverUtilizationPercent))
+	}
 	renderer.WriteColor(builder, internal.ColorReset)
 
 	builder.WriteString("Verdict   : ")
@@ -136,7 +149,7 @@ func renderMemoryDiagnostics(renderer *internal.Renderer, builder *strings.Build
 	renderer.WriteColor(builder, internal.ColorReset)
 
 	if analysis.LeakDetected || analysis.TotalAllocators > 0 {
-		renderArenaSummary(renderer, builder, analysis.Arenas)
+		renderArenaSummary(renderer, builder, analysis.Arenas, analysis.CapturedAt)
 	}
 	builder.WriteString("\n")
 }
@@ -310,7 +323,7 @@ func renderMemoryTimelineAnalysis(renderer *internal.Renderer, builder *strings.
 	renderMemoryTimelineAnalysisHeader(renderer, builder, analysis)
 
 	if memoryTimelineViewsInclude(views, memoryTimelineViewSummary) {
-		renderArenaSummary(renderer, builder, analysis.Arenas)
+		renderArenaSummary(renderer, builder, analysis.Arenas, analysis.CapturedAt)
 	}
 	if memoryTimelineViewsInclude(views, memoryTimelineViewLeaks) && analysis.TotalLiveAllocations > 0 {
 		renderLeakGroups(renderer, builder, analysis.LeakGroups)
@@ -353,6 +366,17 @@ func renderMemoryTimelineAnalysisHeader(renderer *internal.Renderer, builder *st
 		analysis.TotalPeakLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalPeakLiveBytes)))
 	builder.WriteString(fmt.Sprintf("Ever      : %d allocations, %s\n",
 		analysis.TotalEverAllocations, formatting.FormatMemoryBytes(analysis.TotalEverBytes)))
+	if analysis.TotalArenaDataCapBytes > 0 {
+		builder.WriteString(fmt.Sprintf("Arena cap : %s", formatting.FormatMemoryBytes(analysis.TotalArenaDataCapBytes)))
+		if analysis.TotalArenaMmapBytes > 0 {
+			builder.WriteString(fmt.Sprintf("  mmap %s", formatting.FormatMemoryBytes(analysis.TotalArenaMmapBytes)))
+		}
+		builder.WriteString("\n")
+		builder.WriteString(fmt.Sprintf("Util      : live %.1f%%  peak %.1f%%  ever %.1f%%\n",
+			analysis.LiveUtilizationPercent,
+			analysis.PeakUtilizationPercent,
+			analysis.EverUtilizationPercent))
+	}
 	for _, kind := range sortedTimelineKinds(kindCounts) {
 		builder.WriteString(fmt.Sprintf("  %-28s %d\n", kind+":", kindCounts[kind]))
 	}
@@ -360,7 +384,18 @@ func renderMemoryTimelineAnalysisHeader(renderer *internal.Renderer, builder *st
 	builder.WriteString("\n")
 }
 
-func renderArenaSummary(renderer *internal.Renderer, builder *strings.Builder, arenas []memforge.MemforgeArenaSummary) {
+func formatMemoryDiagnosticTimestamp(at time.Time, capturedAt time.Time) string {
+	if at.IsZero() {
+		return "never"
+	}
+	label := at.Format("15:04:05.000")
+	if capturedAt.IsZero() || capturedAt.Before(at) {
+		return label
+	}
+	return fmt.Sprintf("%s (%s ago)", label, capturedAt.Sub(at).Round(time.Millisecond))
+}
+
+func renderArenaSummary(renderer *internal.Renderer, builder *strings.Builder, arenas []memforge.MemforgeArenaSummary, capturedAt time.Time) {
 	renderer.WriteColor(builder, internal.ColorHighlight)
 	builder.WriteString("Arena Summary\n")
 	renderer.WriteColor(builder, internal.ColorReset)
@@ -388,6 +423,8 @@ func renderArenaSummary(renderer *internal.Renderer, builder *strings.Builder, a
 		if age == 0 && !arena.CreatedAt.IsZero() {
 			age = time.Since(arena.CreatedAt)
 		}
+		builder.WriteString(fmt.Sprintf("             created=%s\n", formatMemoryDiagnosticTimestamp(arena.CreatedAt, capturedAt)))
+		builder.WriteString(fmt.Sprintf("             last alloc=%s\n", formatMemoryDiagnosticTimestamp(arena.LastAllocationAt, capturedAt)))
 		builder.WriteString(fmt.Sprintf("             age=%s live=%d/%s peak=%d/%s ever=%d/%s\n",
 			age.Round(time.Millisecond).String(),
 			arena.LiveAllocations, formatting.FormatMemoryBytes(arena.LiveBytes),
@@ -399,13 +436,13 @@ func renderArenaSummary(renderer *internal.Renderer, builder *strings.Builder, a
 				arenaLine += fmt.Sprintf(" mmap=%s", formatting.FormatMemoryBytes(arena.CurrentArenaTotalBytes))
 			}
 			if arena.PeakArenaDataCapBytes > arena.CurrentArenaDataCapBytes {
-				arenaLine += fmt.Sprintf(" peak=%s", formatting.FormatMemoryBytes(arena.PeakArenaDataCapBytes))
-			}
-			if arena.LiveBytes > 0 {
-				utilPct := float64(arena.LiveBytes) * 100 / float64(arena.CurrentArenaDataCapBytes)
-				arenaLine += fmt.Sprintf(" util=%.1f%%", utilPct)
+				arenaLine += fmt.Sprintf(" peak arena=%s", formatting.FormatMemoryBytes(arena.PeakArenaDataCapBytes))
 			}
 			builder.WriteString(arenaLine + "\n")
+			builder.WriteString(fmt.Sprintf("             util live %.1f%%  peak %.1f%%  ever %.1f%%\n",
+				arena.LiveUtilizationPercent,
+				arena.PeakUtilizationPercent,
+				arena.EverUtilizationPercent))
 		}
 		if len(arena.CapacitySegments) > 1 {
 			for _, segment := range arena.CapacitySegments {
