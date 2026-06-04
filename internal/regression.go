@@ -231,7 +231,11 @@ func evaluateStabilityDelta(
 }
 
 func checkFragilityDegradation(baseIters, tgtIters []float64, confidenceLevel float64) (bool, float64) {
-	allocator := memforge.DynamicLinearAllocatorCreateFunction(uint64(memcore.MegaByte*10), memforge.DynamicLinearAllocatorGrowthTemplateDoubleOrNeededWithMaxPanic(uint64(1*memcore.GigaByte)))
+	allocator := memforge.DynamicLinearAllocatorCreateFunction(
+		uint64(memcore.MegaByte*10),
+		memforge.DynamicLinearAllocatorGrowthTemplateDoubleOrNeededWithMaxPanic(uint64(1*memcore.GigaByte)),
+		"",
+	)
 	defer memforge.DynamicLinearAllocatorDestroy(allocator)
 
 	allocFn := func(sizeBytes, alignment uint64) memcore.MarkRaw {

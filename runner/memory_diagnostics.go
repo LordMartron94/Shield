@@ -102,56 +102,126 @@ func shouldRenderMemoryDiagnostics(mode MemoryDiagnosticsMode, analysis memforge
 }
 
 func renderMemoryDiagnostics(renderer *internal.Renderer, builder *strings.Builder, analysis memforge.MemforgeMemoryTimelineAnalysis) {
+	filter := memforge.MemforgeDebuggerDefaultStackFilter()
+	report := memforge.MemforgeMemoryProfileAnalyze(analysis, filter, memforge.MemforgeSizingVerdictFilter{})
+
+	if analysis.LeakDetected {
+		renderMemoryDiagnosticsLeakHeader(renderer, builder, analysis)
+		renderLeakingArenaSummary(renderer, builder, analysis.Arenas, analysis.CapturedAt)
+		builder.WriteString("\n")
+		if len(analysis.LeakGroups) > 0 {
+			renderLeakGroups(renderer, builder, analysis.LeakGroups)
+		}
+	}
+
+	renderMemoryProfileReport(renderer, builder, report)
+	builder.WriteString("\n")
+}
+
+func renderMemoryDiagnosticsLeakHeader(renderer *internal.Renderer, builder *strings.Builder, analysis memforge.MemforgeMemoryTimelineAnalysis) {
 	renderer.WriteColor(builder, internal.ColorHeader)
-	builder.WriteString("=== SHIELD MEMORY DIAGNOSTICS ===\n")
+	builder.WriteString("=== SHIELD MEMORY DIAGNOSTICS (Leaks Detected) ===\n")
 	renderer.WriteColor(builder, internal.ColorReset)
 
-	if !analysis.Available {
+	renderer.WriteColor(builder, internal.ColorMuted)
+	builder.WriteString(fmt.Sprintf("Events    : %d\n", analysis.TotalEvents))
+	builder.WriteString(fmt.Sprintf("Live      : %d Allocations, %s\n",
+		analysis.TotalLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalLiveBytes)))
+	renderer.WriteColor(builder, internal.ColorReset)
+
+	renderer.WriteColor(builder, internal.ColorFail)
+	builder.WriteString("Verdict   : MEMORY LEAK DETECTED\n")
+	renderer.WriteColor(builder, internal.ColorReset)
+}
+
+func renderMemoryProfileReport(renderer *internal.Renderer, builder *strings.Builder, report memforge.MemforgeMemorySystemReport) {
+	title := "MEMFORGE MEMORY SYSTEM REPORT (No Leaks)"
+	if report.LeakDetected {
+		title = "ALLOCATION PROFILE (Aggregated)"
+	}
+
+	renderer.WriteColor(builder, internal.ColorHeader)
+	builder.WriteString("=== " + title + " ===\n")
+	renderer.WriteColor(builder, internal.ColorReset)
+
+	if !report.Available {
 		renderer.WriteColor(builder, internal.ColorMuted)
 		builder.WriteString("Provider  : memforge (unavailable — rebuild with -tags memforge_debug)\n")
 		renderer.WriteColor(builder, internal.ColorReset)
-		builder.WriteString("\n")
 		return
 	}
 
-	renderer.WriteColor(builder, internal.ColorMuted)
-	builder.WriteString("Provider  : memforge\n")
-	builder.WriteString(fmt.Sprintf("Events    : %d\n", analysis.TotalEvents))
-	builder.WriteString(fmt.Sprintf("Allocators: %d Total (%d Active, %d Destroyed)\n",
-		analysis.TotalAllocators, analysis.ActiveAllocators, analysis.DestroyedAllocators))
-	builder.WriteString(fmt.Sprintf("Live      : %d Allocations, %s, %d Leaking Arenas\n",
-		analysis.TotalLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalLiveBytes), analysis.LeakingAllocators))
-	builder.WriteString(fmt.Sprintf("Peak      : %d Allocations, %s\n",
-		analysis.TotalPeakLiveAllocations, formatting.FormatMemoryBytes(analysis.TotalPeakLiveBytes)))
-	builder.WriteString(fmt.Sprintf("Ever      : %d Allocations, %s\n",
-		analysis.TotalEverAllocations, formatting.FormatMemoryBytes(analysis.TotalEverBytes)))
-	if analysis.TotalArenaDataCapBytes > 0 {
-		builder.WriteString(fmt.Sprintf("Arena cap : %s", formatting.FormatMemoryBytes(analysis.TotalArenaDataCapBytes)))
-		if analysis.TotalArenaMmapBytes > 0 {
-			builder.WriteString(fmt.Sprintf("  mmap %s", formatting.FormatMemoryBytes(analysis.TotalArenaMmapBytes)))
+	totalCap := report.TotalMappableCapBytes + report.TotalOpaqueCapBytes
+	highWater := report.GlobalCapacityHighWaterBytes
+	if highWater == 0 {
+		highWater = totalCap
+	}
+
+	builder.WriteString(fmt.Sprintf("Telemetry  : %d Events | %d Total Arenas (%d Active)\n",
+		report.TotalEvents, report.TotalArenas, report.ActiveArenas))
+	builder.WriteString(fmt.Sprintf("Total Cap  : %s [Mappable: %s | Opaque: %s]\n",
+		formatting.FormatMemoryBytes(totalCap),
+		formatting.FormatMemoryBytes(report.TotalMappableCapBytes),
+		formatting.FormatMemoryBytes(report.TotalOpaqueCapBytes)))
+	builder.WriteString(fmt.Sprintf("Peak Load  : %d Allocations | %s Global Peak\n",
+		report.GlobalPeakLiveAllocations, formatting.FormatMemoryBytes(report.GlobalPeakLiveBytes)))
+	builder.WriteString(fmt.Sprintf("High-Water : Global Arena Capacity Peak: %s\n",
+		formatting.FormatMemoryBytes(highWater)))
+
+	if len(report.Buckets) > 0 {
+		builder.WriteString("\nCategorized Allocation Profile (Aggregated by Call Site):\n")
+		for _, bucket := range report.Buckets {
+			renderProfileBucket(renderer, builder, bucket)
 		}
-		builder.WriteString("\n")
-		builder.WriteString(fmt.Sprintf("Util      : live %.1f%%  peak %.1f%%  ever %.1f%%\n",
-			analysis.LiveUtilizationPercent,
-			analysis.PeakUtilizationPercent,
-			analysis.EverUtilizationPercent))
 	}
-	renderer.WriteColor(builder, internal.ColorReset)
 
-	builder.WriteString("Verdict   : ")
-	if analysis.LeakDetected {
-		renderer.WriteColor(builder, internal.ColorFail)
-		builder.WriteString("MEMORY LEAK DETECTED\n")
-	} else {
-		renderer.WriteColor(builder, internal.ColorPass)
-		builder.WriteString("No leaks detected\n")
+	if !report.LeakDetected && len(report.SizingVerdicts) > 0 {
+		builder.WriteString("\nSizing Efficiency Verdict:\n")
+		for _, verdict := range report.SizingVerdicts {
+			renderer.WriteColor(builder, internal.ColorHighlight)
+			builder.WriteString("  " + verdict.Message + "\n")
+			renderer.WriteColor(builder, internal.ColorReset)
+		}
+		builder.WriteString("  STRATEGY: Review preset slab sizes for buckets flagged above.\n")
 	}
-	renderer.WriteColor(builder, internal.ColorReset)
+}
 
-	if analysis.LeakDetected || analysis.TotalAllocators > 0 {
-		renderArenaSummary(renderer, builder, analysis.Arenas, analysis.CapturedAt)
+func renderProfileBucket(renderer *internal.Renderer, builder *strings.Builder, bucket memforge.MemforgeArenaProfileBucket) {
+	backingLabel := "Mappable"
+	if bucket.OpaqueBacking {
+		backingLabel = "Opaque"
+	}
+
+	builder.WriteString(fmt.Sprintf("\n[%s] %s (x%d Arena", backingLabel, bucket.DisplayLabel, bucket.InstanceCount))
+	if bucket.InstanceCount != 1 {
+		builder.WriteString("s")
+	}
+	builder.WriteString(")\n")
+	builder.WriteString(fmt.Sprintf("  Instances: %d spawned, %d destroyed, %d active",
+		bucket.InstanceCount, bucket.DestroyedCount, bucket.ActiveCount))
+	if bucket.MaxConcurrentActive > 1 {
+		builder.WriteString(fmt.Sprintf(" (concurrent high-water: %d)", bucket.MaxConcurrentActive))
 	}
 	builder.WriteString("\n")
+	builder.WriteString(fmt.Sprintf("  Sizing   : Configured: %s | Max Peak Util: %s (%.1f%%) | Ever Alloc: %s\n",
+		formatting.FormatMemoryBytes(bucket.ConfiguredCapBytes),
+		formatting.FormatMemoryBytes(bucket.MaxPeakBytes),
+		bucket.MaxPeakUtilPercent,
+		formatting.FormatMemoryBytes(bucket.TotalEverBytes)))
+	if bucket.SiteLine != "" {
+		renderer.WriteColor(builder, internal.ColorMuted)
+		builder.WriteString("  Site     : " + bucket.SiteLine + "\n")
+		renderer.WriteColor(builder, internal.ColorReset)
+	}
+}
+
+func renderLeakingArenaSummary(renderer *internal.Renderer, builder *strings.Builder, arenas []memforge.MemforgeArenaSummary, capturedAt time.Time) {
+	for _, arena := range arenas {
+		if !arena.Leaking {
+			continue
+		}
+		renderArenaSummarySection(renderer, builder, "Leaking Arena", []memforge.MemforgeArenaSummary{arena}, capturedAt)
+	}
 }
 
 func formatMemoryDiagnosticAddress(address uintptr) string {
@@ -323,7 +393,8 @@ func renderMemoryTimelineAnalysis(renderer *internal.Renderer, builder *strings.
 	renderMemoryTimelineAnalysisHeader(renderer, builder, analysis)
 
 	if memoryTimelineViewsInclude(views, memoryTimelineViewSummary) {
-		renderArenaSummary(renderer, builder, analysis.Arenas, analysis.CapturedAt)
+		report := memforge.MemforgeMemoryProfileAnalyze(analysis, memforge.MemforgeDebuggerDefaultStackFilter(), memforge.MemforgeSizingVerdictFilter{})
+		renderMemoryProfileReport(renderer, builder, report)
 	}
 	if memoryTimelineViewsInclude(views, memoryTimelineViewLeaks) && analysis.TotalLiveAllocations > 0 {
 		renderLeakGroups(renderer, builder, analysis.LeakGroups)
@@ -396,16 +467,39 @@ func formatMemoryDiagnosticTimestamp(at time.Time, capturedAt time.Time) string 
 }
 
 func renderArenaSummary(renderer *internal.Renderer, builder *strings.Builder, arenas []memforge.MemforgeArenaSummary, capturedAt time.Time) {
-	renderer.WriteColor(builder, internal.ColorHighlight)
-	builder.WriteString("Arena Summary\n")
-	renderer.WriteColor(builder, internal.ColorReset)
+	mappable := make([]memforge.MemforgeArenaSummary, 0, len(arenas))
+	opaque := make([]memforge.MemforgeArenaSummary, 0, len(arenas))
+	for _, arena := range arenas {
+		if arena.OpaqueBacking {
+			opaque = append(opaque, arena)
+		} else {
+			mappable = append(mappable, arena)
+		}
+	}
 
-	if len(arenas) == 0 {
+	if len(mappable) == 0 && len(opaque) == 0 {
+		renderer.WriteColor(builder, internal.ColorHighlight)
+		builder.WriteString("Arena Summary\n")
+		renderer.WriteColor(builder, internal.ColorReset)
 		renderer.WriteColor(builder, internal.ColorMuted)
 		builder.WriteString("  (no allocators recorded)\n")
 		renderer.WriteColor(builder, internal.ColorReset)
+		builder.WriteString("\n")
 		return
 	}
+
+	renderArenaSummarySection(renderer, builder, "Arena Summary (Mappable backing)", mappable, capturedAt)
+	renderArenaSummarySection(renderer, builder, "Arena Summary (Opaque backing)", opaque, capturedAt)
+}
+
+func renderArenaSummarySection(renderer *internal.Renderer, builder *strings.Builder, title string, arenas []memforge.MemforgeArenaSummary, capturedAt time.Time) {
+	if len(arenas) == 0 {
+		return
+	}
+
+	renderer.WriteColor(builder, internal.ColorHighlight)
+	builder.WriteString(title + "\n")
+	renderer.WriteColor(builder, internal.ColorReset)
 
 	for _, arena := range arenas {
 		statusColor := internal.ColorPass
@@ -417,16 +511,19 @@ func renderArenaSummary(renderer *internal.Renderer, builder *strings.Builder, a
 		renderer.WriteColor(builder, statusColor)
 		builder.WriteString(fmt.Sprintf("  %-10s", statusLabel))
 		renderer.WriteColor(builder, internal.ColorReset)
-		builder.WriteString(fmt.Sprintf(" %-28s %s\n", arena.Name, formatMemoryDiagnosticAddress(arena.Address)))
-		renderer.WriteColor(builder, internal.ColorMuted)
-		age := arena.AgeAtCapture
-		if age == 0 && !arena.CreatedAt.IsZero() {
-			age = time.Since(arena.CreatedAt)
+		statusSuffix := ""
+		if arena.Destroyed {
+			statusSuffix = " destroyed"
 		}
+		builder.WriteString(fmt.Sprintf(" %-28s %s%s\n", arena.Name, formatMemoryDiagnosticAddress(arena.Address), statusSuffix))
+		renderer.WriteColor(builder, internal.ColorMuted)
 		builder.WriteString(fmt.Sprintf("             created=%s\n", formatMemoryDiagnosticTimestamp(arena.CreatedAt, capturedAt)))
+		if arena.Destroyed {
+			builder.WriteString(fmt.Sprintf("             destroyed=%s\n", formatMemoryDiagnosticTimestamp(arena.DestroyedAt, capturedAt)))
+		}
+		builder.WriteString(fmt.Sprintf("             alive=%s\n", arena.TimeAlive.Round(time.Millisecond)))
 		builder.WriteString(fmt.Sprintf("             last alloc=%s\n", formatMemoryDiagnosticTimestamp(arena.LastAllocationAt, capturedAt)))
-		builder.WriteString(fmt.Sprintf("             age=%s live=%d/%s peak=%d/%s ever=%d/%s\n",
-			age.Round(time.Millisecond).String(),
+		builder.WriteString(fmt.Sprintf("             live=%d/%s peak=%d/%s ever=%d/%s\n",
 			arena.LiveAllocations, formatting.FormatMemoryBytes(arena.LiveBytes),
 			arena.PeakLiveAllocations, formatting.FormatMemoryBytes(arena.PeakLiveBytes),
 			arena.EverAllocations, formatting.FormatMemoryBytes(arena.EverBytes)))
